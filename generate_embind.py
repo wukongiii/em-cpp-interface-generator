@@ -41,6 +41,8 @@ class BindingInfo:
         self.name = cursor.spelling
         self.type = cursor.type.spelling
         self.kind = cursor.kind
+        self.displayname= cursor.displayname
+        self.is_template_instance = self.displayname.endswith('>')
 
         self.indent_space = 4
 
@@ -175,7 +177,6 @@ class FunctionInfo(BindingInfo):
         self.return_type = ''
         self.args = []
         self.is_static = False
-
         self.is_overloaded = False
 
         super().__init__(cursor, parent)
@@ -245,8 +246,6 @@ class FunctionInfo(BindingInfo):
             return operator_name_map[operator_name]
         else:
             return operator_name
-    
-    
 
 # A class that stores functions with the same name. i.e. overloaded functions
 class FunctionHomonymic():
@@ -376,10 +375,11 @@ class ClassInfo(BindingInfo):
         self.structs = []
         self.classes = []
         self.static_values = []
+        
         super().__init__(cursor, parent)
 
     def process(self):
-       self.add_definations(self.cursor)
+        self.add_definations(self.cursor)
 
     def add_definations(self, cursor):
         # Only public members should be added
@@ -400,6 +400,8 @@ class ClassInfo(BindingInfo):
                 self.structs.append(StructInfo(child, self))
             elif child.kind == CursorKind.CLASS_DECL:
                 self.classes.append(ClassInfo(child, self))
+            elif child.kind == CursorKind.FUNCTION_TEMPLATE:
+                print( f'Function template not yet supported: {child.displayname} in {self.name}')
             elif child.kind == CursorKind.CXX_ACCESS_SPEC_DECL:
                 pass
             else:
@@ -624,7 +626,7 @@ class ProjectInfo(NamespaceInfo):
 
         self.includes = []
 
-        fake_cursor = SimpleNamespace(spelling='MainModule', type=SimpleNamespace(spelling='root'), kind='root', canocincal=None)
+        fake_cursor = SimpleNamespace(spelling='MainModule', type=SimpleNamespace(spelling='root'), kind='root', displayname='root',)
         fake_cursor.canonical = fake_cursor
         
         super().__init__(fake_cursor, None, dest_dir)
