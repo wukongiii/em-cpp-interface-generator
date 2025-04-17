@@ -702,14 +702,18 @@ def copy_files(src_dir, dest_dir):
     shutil.copytree(src_dir, dest_dir)
 
 
-
+import argparse
 def main():
-    if len(sys.argv) != 3:
-        print("Usage: python script.py <src_dir> <dest_dir>")
-        return
+    parser = argparse.ArgumentParser(description='Embind generator')
+    parser.add_argument('src_dir', type=str, help='Source directory')
+    parser.add_argument('dest_dir', type=str, help='Destination directory')
+    args = parser.parse_args()
 
-    src_dir, dest_dir = sys.argv[1], sys.argv[2]
+    src_dir, dest_dir = args.src_dir, args.dest_dir
+    src_dir = os.path.abspath(src_dir)
     dest_dir = os.path.abspath(dest_dir)
+
+
     # Step 1: Copy files
     copy_files(src_dir, dest_dir)
     

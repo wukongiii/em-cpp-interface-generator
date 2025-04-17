@@ -16,10 +16,11 @@ The Embind Generator is a tool to generate those formulaic bindings for you. It'
 
 ## Best practices
 
-- Try WebIDL first.
-- If WebIDL is not enough, try Embind Generator.
+- Consider WebIDL first.
+- If WebIDL is not enought and you only need to deal with few projects, you can write your own bindings
+- If you have multiple small and simple projects, you can use the Embind Generator to generate rough bindings for you, and later fine tune them.
 - Add features to Embind Generator if you find it's not enough.
-- Write your own embind bindings to the source code.
+
 
 ## Detailed comparison of Embind Generator and WebIDL(AI generated content)
 
