@@ -336,7 +336,24 @@ class ClassStaticValueInfo(BindingInfo):
 # .function("FunctionName", &ClassName::FunctionName)
 class ClassMethodInfo(FunctionInfo):
     def __init__(self, cursor, parent):
+        self.is_virtual = False
+        self.is_pure_virtual = False
+        self.is_overridable = False
         super().__init__(cursor, parent)
+
+    def process(self):
+        super().process()
+        
+        # 检查方法属性
+        self.is_virtual = self.cursor.is_virtual_method()
+        self.is_pure_virtual = self.cursor.is_pure_virtual_method()
+        
+        # 判断是否可以被覆盖
+        self.is_overridable = (
+            self.is_virtual and
+            not self.cursor.is_final_method() and
+            self.cursor.access_specifier != AccessSpecifier.PRIVATE
+        )
    
     def get_binding_prefix(self):
         return '.'
@@ -375,6 +392,8 @@ class ClassInfo(BindingInfo):
         self.structs = []
         self.classes = []
         self.static_values = []
+        self.is_derived = False
+        self.base_class_name = ''
         
         super().__init__(cursor, parent)
 
@@ -386,7 +405,11 @@ class ClassInfo(BindingInfo):
         filtered_children = [c for c in cursor.get_children() if c.access_specifier == AccessSpecifier.PUBLIC]
 
         for child in filtered_children:
-            if child.kind == CursorKind.CONSTRUCTOR:
+            if child.kind == CursorKind.CXX_BASE_SPECIFIER:
+                self.is_derived = True
+                self.base_class_name = child.type.spelling
+                pass
+            elif child.kind == CursorKind.CONSTRUCTOR:
                 self.constructors.add_function(ConstructorInfo(child, self))
             elif child.kind == CursorKind.VAR_DECL and child.storage_class == StorageClass.STATIC:
                 self.static_values.append(ClassStaticValueInfo(child, self))
@@ -432,11 +455,22 @@ class ClassInfo(BindingInfo):
     
     def get_binding_type(self):
         return 'class_'
-    
+
+    def gather_binding_info(self):
+       return super().gather_binding_info() | {
+           'base_class_name': self.base_class_name,
+        }
+
     def get_binding_template(self):
-        if projectConfig.BindingStructure == BindingStructure.FLATTENED:
-            return '%(prefix)s%(binding_type)s<%(full_name)s>("%(mangled_name)s")%(suffix)s'
-        return '%(prefix)s%(binding_type)s<%(full_name)s>("%(name)s")%(suffix)s'
+        if self.is_derived:
+            if projectConfig.BindingStructure == BindingStructure.FLATTENED:
+                return '%(prefix)s%(binding_type)s<%(full_name)s, base<%(base_class_name)s>>("%(mangled_name)s")%(suffix)s'
+            return '%(prefix)s%(binding_type)s<%(full_name)s, base<%(base_class_name)s>>("%(name)s")%(suffix)s'
+        else:
+            if projectConfig.BindingStructure == BindingStructure.FLATTENED:
+                return '%(prefix)s%(binding_type)s<%(full_name)s>("%(mangled_name)s")%(suffix)s'
+            return '%(prefix)s%(binding_type)s<%(full_name)s>("%(name)s")%(suffix)s'
+
     
     def get_binding(self, indent):
         spaces = ' ' * indent * 4
