@@ -292,6 +292,8 @@ class ClassFieldInfo(BindingInfo):
     def __init__(self, cursor, parent):
         super().__init__(cursor, parent)
 
+    def get_binding_prefix(self):
+        return '.'
     def get_binding_type(self):
         return 'property'
     
@@ -305,7 +307,7 @@ class ClassFieldInfo(BindingInfo):
     
     # .property("FieldName", &ClassName::FieldName, return_value_policy::reference())
     def get_binding_template(self):
-        return '.%(binding_type)s("%(name)s", &%(full_name)s, %(return_value_policy)s)'
+        return '%(prefix)s%(binding_type)s("%(name)s", &%(full_name)s, %(return_value_policy)s)'
     
 
 # see: https://emscripten.org/docs/api_reference/bind.h.html#_CPPv4NK6class_14class_propertyEPKcP9FieldType
@@ -324,13 +326,8 @@ class ClassStaticValueInfo(BindingInfo):
     def get_binding_type(self):
             return 'class_property'
     
-    # .class_property("staticField", &ClassName::staticField)
-    def get_binding_template(self):
-        if self.is_constant:
-            #TODO: add constant value support. Currently if trying to set the value, it will throw an error.
-            return '.' + super().get_binding_template()
-        else:
-            return '.' + super().get_binding_template()
+    def get_binding_prefix(self):
+        return '.'
     
 
 # .function("FunctionName", &ClassName::FunctionName)
@@ -338,22 +335,13 @@ class ClassMethodInfo(FunctionInfo):
     def __init__(self, cursor, parent):
         self.is_virtual = False
         self.is_pure_virtual = False
-        self.is_overridable = False
         super().__init__(cursor, parent)
 
     def process(self):
         super().process()
         
-        # 检查方法属性
         self.is_virtual = self.cursor.is_virtual_method()
         self.is_pure_virtual = self.cursor.is_pure_virtual_method()
-        
-        # 判断是否可以被覆盖
-        self.is_overridable = (
-            self.is_virtual and
-            not self.cursor.is_final_method() and
-            self.cursor.access_specifier != AccessSpecifier.PRIVATE
-        )
    
     def get_binding_prefix(self):
         return '.'
@@ -366,8 +354,6 @@ class ClassStaticMethodInfo(ClassMethodInfo):
     def get_binding_type(self):
         return 'class_function'
     
-    def get_binding_prefix(self):
-        return '.'
                         
 class ConstructorInfo(ClassMethodInfo):
     def __init__(self, cursor, parent):
@@ -375,6 +361,9 @@ class ConstructorInfo(ClassMethodInfo):
 
     def get_binding_type(self):
         return 'constructor'
+        
+    def get_binding_template(self):
+        return '%(prefix)s%(binding_type)s<%(args)s>()'
    
 class Constructors(Functions):
     def __init__(self):
