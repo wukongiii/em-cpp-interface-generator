@@ -16,10 +16,6 @@ class ClassObjectMemoryManagement(Enum):
     HANDY = 0
     SMART_PTR = 1
 
-class BindingStructure(Enum):
-    FLATTENED = 0
-    STRUCTURAL = 1
-
 
 ######## Project default configurations ################
 class ProjectConfig:
@@ -27,7 +23,6 @@ class ProjectConfig:
         self.FuncReturnValuePolicy = FunctionReturnValuePolicy.REFERENCE
         self.ClassObjectMemoryManagement = ClassObjectMemoryManagement.HANDY
         # self.ClassObjectMemoryManagement = ClassObjectMemoryManagement.SMART_PTR
-        self.BindingStructure = BindingStructure.FLATTENED
 
 projectConfig = ProjectConfig()
 
@@ -63,10 +58,16 @@ class BindingInfo:
             mangeled_name = parent_name + '::' + mangeled_name
         return mangeled_name
 
+    def get_name(self):
+        return self.name
+    
     def get_full_name(self):
         if self.is_top_level():
             return self.name
-        return self.parent.name + '::' + self.name
+        return self.parent.get_full_name() + '::' + self.name
+    
+    def get_type(self):
+        return self.type
     
     def get_binding_type(self):
         return 'UNKNOWN'
@@ -79,12 +80,15 @@ class BindingInfo:
     
     def gather_binding_info(self):
         binding_info = {
-            'binding_type': self.get_binding_type(),
+            'binding_type': self.get_binding_type(), # class_ enum_ function etc.
+
+            'name': self.get_name(),
             'full_name': self.get_full_name(),
+            'type': self.get_type(),
             'mangled_name': self.get_mangled_name(),
-            'name': self.name,
-            'prefix': self.get_binding_prefix(),
-            'suffix': self.get_binding_suffix(),
+
+            'prefix': self.get_binding_prefix(), # '.' or ''
+            'suffix': self.get_binding_suffix(), # ';' or ''
         }
         return binding_info
     # UNKONWN("BindingName", BindingFullName)
@@ -116,7 +120,7 @@ class EnumValueInfo(BindingInfo):
         return 'value'
     
     def get_binding_template(self):
-        return '.%(binding_type)s("%(name)s", %(full_name)s)'
+        return '.%(binding_type)s("%(name)s", %(type)s)'
 
 
 class EnumInfo(BindingInfo):
@@ -132,17 +136,23 @@ class EnumInfo(BindingInfo):
         return 'enum_'
     
     def get_binding_template(self):
-        if projectConfig.BindingStructure == BindingStructure.STRUCTURAL:
-            return '.%(binding_type)s<%(full_name)s>("%(name)s")'
-        elif projectConfig.BindingStructure == BindingStructure.FLATTENED:
-            return '%(binding_type)s<%(full_name)s>("%(mangled_name)s")'
+        # using mangled name to avoid name conflict
+        return '%(binding_type)s<%(type)s>("%(mangled_name)s")'
+    
+        ## using original name
+        #return '.%(binding_type)s<%(type)s>("%(name)s")'
+        
+        
         
     def get_binding(self, indent=0):
-        binding = [super().get_binding(indent)]
-        for value in self.values:
-            binding.append(value.get_binding(indent + 1))
+        spaces = ' ' * (indent * self.indent_space)
 
-        return '\n'.join(binding) + ';'
+        bindings = [super().get_binding(indent)]
+        for value in self.values:
+            bindings.append(value.get_binding(indent + 1))
+
+        bindings.append(f'{spaces};')
+        return '\n'.join(bindings)
 
 
 # see: https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#constants
@@ -185,9 +195,7 @@ class FunctionInfo(BindingInfo):
         self.return_type = self.cursor.result_type.spelling
         self.args = [arg.type.spelling for arg in self.cursor.get_arguments()]
         self.is_static = self.cursor.storage_class == StorageClass.STATIC
-        if self.name.startswith('operator'):
-            self.name = self.get_mapped_operator_name(self.name)
-
+        
     def get_binding_type(self):
             return 'function'
    
@@ -195,17 +203,23 @@ class FunctionInfo(BindingInfo):
         return super().gather_binding_info() | {
             'return_type': self.return_type,
             'args': ', '.join(self.args),
+            'signature': self.type,
         }
 
     def get_binding_template(self):
         if self.is_overloaded:
-            return '%(prefix)s%(binding_type)s("%(name)s", select_overload<%(return_type)s(%(args)s)>(&%(full_name)s))%(suffix)s'
+            return '%(prefix)s%(binding_type)s("%(name)s", select_overload<%(signature)s>(&%(full_name)s))%(suffix)s'
         else:
             return super().get_binding_template()
         
     def get_binding_suffix(self):
         return ';'
     
+    def get_name(self):
+        if self.name.startswith('operator'):
+            return self.get_mapped_operator_name(self.name)
+        return self.name
+
     def get_mapped_operator_name(self, operator_name):
         operator_name_map = {
             'operator=': '_assign',
@@ -346,6 +360,9 @@ class ClassMethodInfo(FunctionInfo):
     def get_binding_prefix(self):
         return '.'
     
+    def get_binding_suffix(self):
+        return ''
+    
  # .class_function("FunctionName", &ClassName::FunctionName)
 class ClassStaticMethodInfo(ClassMethodInfo):
     def __init__(self, cursor, parent):
@@ -419,24 +436,23 @@ class ClassInfo(BindingInfo):
             else:
                 print(f'Ignored in class: {child.kind} name:{child.displayname} in {self.name}')
 
-    def flatten_structure(self, root):
-        if (root.definations.get(self.name) is not None):
-            raise ValueError(f'Class name conflict: {self.name}')
-        
-        root.definations[self.name] = self
-        for e in self.enums:
-            if (root.definations.get(e.name) is not None):
-                raise ValueError(f'Class name conflict: {e.name}')
+
+    # Unnest the nested classes and structs and enums
+    def unnest_to_namespace(self, namespace):
+        namespace.definations.append(self)
+
+        # move enums
+        namespace.definations.extend(self.enums)
         self.enums = []
 
         # Continue to flatten the nested classes
         for c in self.classes:
-            c.flatten_structure(root)
+            c.unnest_to_namespace(namespace)
         self.classes = []
         
         # and nested structs
         for c in self.structs:
-            c.flatten_structure(root)
+            c.unnest_to_namespace(namespace)
         self.structs = []
         
     def get_mangling_prefix(self):
@@ -452,13 +468,17 @@ class ClassInfo(BindingInfo):
 
     def get_binding_template(self):
         if self.is_derived:
-            if projectConfig.BindingStructure == BindingStructure.FLATTENED:
-                return '%(prefix)s%(binding_type)s<%(full_name)s, base<%(base_class_name)s>>("%(mangled_name)s")%(suffix)s'
-            return '%(prefix)s%(binding_type)s<%(full_name)s, base<%(base_class_name)s>>("%(name)s")%(suffix)s'
+            # using mangled name
+            return '%(prefix)s%(binding_type)s<%(type)s, base<%(base_class_name)s>>("%(mangled_name)s")%(suffix)s'
+            
+            # # using original name
+            # return '%(prefix)s%(binding_type)s<%(type)s, base<%(base_class_name)s>>("%(name)s")%(suffix)s'
         else:
-            if projectConfig.BindingStructure == BindingStructure.FLATTENED:
-                return '%(prefix)s%(binding_type)s<%(full_name)s>("%(mangled_name)s")%(suffix)s'
-            return '%(prefix)s%(binding_type)s<%(full_name)s>("%(name)s")%(suffix)s'
+            # using mangled name
+            return '%(prefix)s%(binding_type)s<%(type)s>("%(mangled_name)s")%(suffix)s'
+            
+            # # using original name
+            # return '%(prefix)s%(binding_type)s<%(type)s>("%(name)s")%(suffix)s'
 
     
     def get_binding(self, indent):
@@ -516,13 +536,13 @@ class NamespaceInfo(BindingInfo):
     def __init__(self, cursor, parent, project_dir):
         self.project_dir = project_dir
 
-        self.definations:dict[str, BindingInfo] = {}
+        self.definations:list[BindingInfo] = []
         self.namespaces:dict[str, NamespaceInfo] = {}
         super().__init__(cursor, parent)
 
     
     # Elements in a structure must be in a project level or a namespace level
-    def scan_structure(self, cursor, definations:dict[str, BindingInfo], parent, project_dir):
+    def scan_structure(self, cursor, definations:list[BindingInfo], parent, project_dir):
         location = cursor.translation_unit.spelling
         filtered_children = [c for c in cursor.get_children() if c.kind != CursorKind.LINKAGE_SPEC and c.location.file.name == location and c.is_definition()]
         
@@ -555,12 +575,8 @@ class NamespaceInfo(BindingInfo):
                 else:
                     print(f'Ignored in structure: {child.kind} in {child.spelling}')
                 
-                
                 if bindingInfo is not None:
-                    if definations.get(bindingInfo.name) is None:
-                        definations[bindingInfo.name] = bindingInfo
-                    else:
-                        print(f'Ignored duplicate defination: {bindingInfo.name}')
+                    definations.append(bindingInfo)
                         
     def process(self):
         self.scan_structure(self.cursor, self.definations, self, self.project_dir)
@@ -568,78 +584,47 @@ class NamespaceInfo(BindingInfo):
     def add_definations(self, cursor):
         self.scan_structure(cursor, self.definations, self, self.project_dir)
 
-    def flatten_structure(self, root):
-        # flatten the classes in current namespace
-        removed_classes = []
-        for key, value in self.definations.items():
-            if not isinstance(value, ClassInfo):
+    # flatten() is used to unnest the nested classes and structs
+    def flatten(self):
+        classes:list[ClassInfo] = []
+        for _class in self.definations:
+            # not class and not struct
+            if not isinstance(_class, ClassInfo):
                 continue
-
-            if root.definations.get(key) is not None:
-                raise ValueError(f'Class name conflict: {key}')
             
-            value.flatten_structure(root)
-            removed_classes.append(key)
+            classes.append(_class)
+        
+        # for the consistency of the code, remove the classes from the definations first, later classes will be added to the definations
+        for _class in classes:
+            self.definations.remove(_class)
 
-        for key in removed_classes:
-            del self.definations[key]
+        for _class in classes:
+            _class.unnest_to_namespace(self)
 
         # flatten the nested namespaces
-        for key, value in self.namespaces.items():
-            value.flatten_structure(root)
+        for ns in self.namespaces.values():
+            ns.flatten()
 
     def get_mangled_name(self):
         mangled_name = 'N_' + self.cursor.spelling
         return self.parent.get_mangled_name() + mangled_name
     def get_binding(self, indent):
-        if (projectConfig.BindingStructure == BindingStructure.FLATTENED):
-            return self.get_binding_flattened(indent)
-        elif (projectConfig.BindingStructure == BindingStructure.STRUCTURAL):
-            return self.get_binding_structural(indent)
-        else:
-            raise ValueError(f'Unknown orgnize_structure: {self.orgnize_structure}')
-    
-    def get_binding_flattened(self, indent):
-        spaces = ' ' * (indent * self.indent_space)
-        bindings = [f'{spaces}// namespace: {self.name} ']
-        # Add bindings for definitions in the namespace
-        for definition in self.definations.values():
-            bindings.append(definition.get_binding(indent + 1))
-
-        # Add bindings for nested namespaces
-        for namespace in self.namespaces.values():
-            bindings.append(namespace.get_binding(indent + 1))
-
-        # End of namespace
-        bindings.append(f'{spaces};\n')
-
-        return '\n'.join(bindings)
-
-    # Since embind does not support namepace, keep this for future use
-    def get_binding_structural(self, indent):
         spaces = ' ' * (indent * self.indent_space)
         bindings = []
-
-        # Namespace declaration
-        is_subnamespace = ''
-        if self.is_top_level():
-            is_subnamespace = ''
-        else:
-            is_subnamespace = '.'
-        bindings.append(f'{spaces}{is_subnamespace}namespace_("{self.name}")')
-
+        bindings.append(f'{spaces}{{ using namespace {self.name};')
+        
         # Add bindings for definitions in the namespace
-        for definition in self.definations.values():
+        for definition in self.definations:
             bindings.append(definition.get_binding(indent + 1))
 
         # Add bindings for nested namespaces
         for namespace in self.namespaces.values():
             bindings.append(namespace.get_binding(indent + 1))
 
-        # End of namespace
-        bindings.append(f'{spaces};\n')
-
+        bindings.append(f'{spaces}}} // namespace {self.name}')
         return '\n'.join(bindings)
+
+    
     
 class ProjectInfo(NamespaceInfo):
     def __init__(self, headers:list, dest_dir, parse_args=['-x', 'c++', '-std=c++17']):
@@ -663,9 +648,9 @@ class ProjectInfo(NamespaceInfo):
             relative_path = os.path.relpath(header, self.dest_dir)
             self.includes.append(relative_path)
 
-    def flatten_structure(self, root):
-        for key, value in self.namespaces.items():
-            value.flatten_structure(root)
+    def flatten(self):
+        for ns in self.namespaces.values():
+            ns.flatten()
 
     def get_mangled_name(self):
         return ''
@@ -679,11 +664,13 @@ class ProjectInfo(NamespaceInfo):
         for header in self.includes:
             bindings.append(f'#include "{header}"')
 
+        bindings.append(f'{spaces}using namespace emscripten;')
+
         # Start of embind bindings
         bindings.append(f'\n{spaces}EMSCRIPTEN_BINDINGS({self.name}) {{')
 
         # Add bindings for definitions in the project
-        for definition in self.definations.values():
+        for definition in self.definations:
             bindings.append(definition.get_binding(indent + 1))
 
         # Add bindings for nested namespaces
@@ -726,9 +713,7 @@ def main():
                 headers.append(path)
                 
     project_info = ProjectInfo(headers, dest_dir)
-    if (projectConfig.BindingStructure == BindingStructure.FLATTENED):
-        project_info.flatten_structure(project_info)
-    
+    project_info.flatten()    
     binding_content = project_info.get_binding(0)
     with open(os.path.join(dest_dir, 'embind_bindings.cpp'), 'w') as f:
         f.write(binding_content)
