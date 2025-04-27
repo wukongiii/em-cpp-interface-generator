@@ -209,7 +209,10 @@ class FunctionInfo(BindingInfo):
         self.is_static = False
         self.is_overloaded = False
 
-        self.hasVoidPointer = False
+        self.returns_raw_pointer = False
+        self.takes_raw_pointer = False
+        self.has_any_void_pointer = False
+        self.has_any_nonconst_reference = False
 
         super().__init__(cursor, parent)
 
@@ -218,29 +221,51 @@ class FunctionInfo(BindingInfo):
 
         self.return_type = self.cursor.result_type.spelling
         self.args = [arg.type.get_canonical().spelling for arg in self.cursor.get_arguments()]
-        self.hasVoidPointer = any(arg == 'void *' for arg in self.args) or self.return_type == 'void *'
-        
-        if  self.hasVoidPointer:
+
+        # Check if the function returns a raw pointer or takes a raw pointer as an argument, later should use different policy
+        self.returns_raw_pointer = self.return_type.endswith('*')
+        self.takes_raw_pointer = any(arg.endswith('*') for arg in self.args)
+
+        # Check if the function has any void pointer or non-const reference, they are not supported by embind
+        self.has_any_void_pointer = any(arg == 'void *' for arg in self.args) or self.return_type == 'void *'
+        self.has_any_nonconst_reference = any(arg.endswith('&') and not arg.startswith('const') for arg in self.args)
+
+        if  self.has_any_void_pointer:
             self.should_be_ignored = True
             self.ignored_reason = f'void pointer found in function(embind does not support) : {self.get_full_name()}'
-          
+        
+        if self.has_any_nonconst_reference:
+            self.should_be_ignored = True
+            self.ignored_reason += f'non-const reference found in function(embind does not support) : {self.get_full_name()}'
         
         
     def get_binding_type(self):
             return 'function'
    
     def gather_binding_info(self):
+
+        # see: https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#raw-pointers
+        # ref:
+        # Because raw pointers have unclear lifetime semantics, embind requires their use to be marked with either allow_raw_pointers or with a return_value_policy. 
+        # If the function returns a pointer it is recommended to use a return_value_policy instead of the general allow_raw_pointers.
+        pointer_policy = ''
+        if self.takes_raw_pointer:
+            pointer_policy = ', allow_raw_pointers()'
+        if self.returns_raw_pointer:
+            pointer_policy = ', return_value_policy::reference()'
+
         return super().gather_binding_info() | {
             'return_type': self.return_type,
             'args': ', '.join(self.args),
             'signature': self.type,
+            'pointer_policy': pointer_policy,
         }
 
     def get_binding_template(self):
         if self.is_overloaded:
-            return '%(prefix)s%(binding_type)s("%(name)s", select_overload<%(signature)s>(&%(full_name)s))%(suffix)s'
+            return '%(prefix)s%(binding_type)s("%(name)s", select_overload<%(signature)s>(&%(full_name)s)%(pointer_policy)s)%(suffix)s'
         else:
-            return super().get_binding_template()
+            return '%(prefix)s%(binding_type)s("%(name)s", &%(full_name)s%(pointer_policy)s)%(suffix)s'
         
     def get_binding_suffix(self):
         return ';'
