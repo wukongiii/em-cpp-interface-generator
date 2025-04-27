@@ -259,6 +259,8 @@ class FunctionInfo(BindingInfo):
     def __init__(self, cursor, parent):
         self.return_type = ''
         self.args = []
+        self.args_count = 0
+
         self.is_static = False
         self.is_overloaded = False
 
@@ -274,7 +276,8 @@ class FunctionInfo(BindingInfo):
 
         self.return_type = self.cursor.result_type.spelling
         self.args = [arg.type.get_canonical().spelling for arg in self.cursor.get_arguments()]
-
+        self.args_count = len(self.args)
+        
         # Check if the function returns a raw pointer or takes a raw pointer as an argument, later should use different policy
         self.returns_raw_pointer = self.return_type.endswith('*')
         self.takes_raw_pointer = any(arg.endswith('*') for arg in self.args)
@@ -380,14 +383,24 @@ class FunctionHomonymic():
     def __init__(self):
         self.homonymic_functions:list[FunctionInfo] = []
 
-    def add_function(self, method: FunctionInfo):
+    def add_function(self, method: FunctionInfo, check_args_count = False):
         
         if len(self.homonymic_functions) > 0:
             method.is_overloaded = True
         if len(self.homonymic_functions) == 1:
             self.homonymic_functions[0].is_overloaded = True
 
+        if check_args_count:
+            for func in self.homonymic_functions:
+                if func.args_count == method.args_count:
+                    # emcc will pass if you keep it in the bindings, but later will throw an error in the runtime, like:
+                    ## Uncaught BindingError: Cannot register multiple constructors with identical number of parameters  for class! 
+                    ## Overload resolution is currently only performed using the parameter count, not actual type info!
+                    method.should_be_ignored = True
+                    method.ignored_reason = f'overloaded function with same amount of paramters(embind does not support): {method.get_full_name()}'
+
         self.homonymic_functions.append(method)
+        
 
     def get_binding(self, indent):
         bindings = []
@@ -400,10 +413,10 @@ class Functions():
     def __init__(self):
         self.functionIndexedByName:dict[str, FunctionHomonymic] = {}
 
-    def add_function(self, function: FunctionInfo):
+    def add_function(self, function: FunctionInfo, check_args_count = False):
         if function.name not in self.functionIndexedByName:
             self.functionIndexedByName[function.name] = FunctionHomonymic()
-        self.functionIndexedByName[function.name].add_function(function)
+        self.functionIndexedByName[function.name].add_function(function, check_args_count)
     
     def count(self):
         return len(self.functionIndexedByName)
@@ -511,6 +524,9 @@ class Constructors(Functions):
     def __init__(self):
         super().__init__()
 
+    def add_function(self, function: FunctionInfo, check_args_count = True):
+        super().add_function(function, check_args_count)
+        
     def get_binding(self, indent):
         return super().get_binding(indent)
     
