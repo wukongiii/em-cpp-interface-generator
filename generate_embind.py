@@ -120,7 +120,7 @@ class EnumValueInfo(BindingInfo):
         return 'value'
     
     def get_binding_template(self):
-        return '.%(binding_type)s("%(name)s", %(type)s)'
+        return '.%(binding_type)s("%(name)s", %(type)s::%(name)s)'
 
 
 class EnumInfo(BindingInfo):
@@ -165,6 +165,9 @@ class ConstantValueInfo(BindingInfo):
         return 'constant'
     def get_binding_suffix(self):
         return ';'
+    
+    def get_binding_template(self):
+        return '%(prefix)s%(binding_type)s("%(name)s", %(full_name)s)%(suffix)s'
 
     
 # A static value defined in a file or namespace usually should not be exposed, and embind does not directly support this.
@@ -702,7 +705,7 @@ def main():
 
 
     # Step 1: Copy files
-    copy_files(src_dir, dest_dir)
+    # copy_files(src_dir, dest_dir)
     
     # Step 2: Analyze headers
     headers = []
