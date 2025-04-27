@@ -1,7 +1,7 @@
 import sys
 import os
 import shutil
-from clang.cindex import Config, Index, Cursor, CursorKind, AccessSpecifier, StorageClass, TranslationUnit
+from clang.cindex import Type, Index, Cursor, CursorKind, TypeKind, AccessSpecifier, StorageClass, TranslationUnit
 from types import SimpleNamespace
 from enum import Enum
 
@@ -34,9 +34,9 @@ class BindingInfo:
         self.parent = parent
 
         self.name = cursor.spelling
-        self.type = cursor.type.spelling
+        self.type = cursor.type.spelling if hasattr(cursor, 'type') else ''
         self.kind = cursor.kind
-        self.displayname= cursor.displayname
+        self.displayname= cursor.displayname if hasattr(cursor, 'displayname') else ''
         self.is_template_instance = self.displayname.endswith('>')
 
         self.should_be_ignored = False
@@ -71,6 +71,14 @@ class BindingInfo:
     
     def get_type(self):
         return self.type
+
+    # returns all relevant type names for the binding
+    def get_all_type_names(self):
+        return [self.type]
+    
+    # returns all relevant types for the binding
+    def get_all_types(self) -> list[Type]:
+        return [self.cursor.type]
     
     def get_binding_type(self):
         return 'UNKNOWN'
@@ -122,6 +130,51 @@ class BindingInfo:
         # binding = f'{spaces}{binding_content}'
         return binding_content
 
+
+class TypeDefInfo(BindingInfo):
+    def __init__(self, cursor, parent):
+        self.original_type_name = ''
+        super().__init__(cursor, parent)
+
+    def process(self):
+        self.name = self.cursor.spelling
+        self.original_type_name = self.cursor.type.get_canonical().spelling
+
+    def get_all_type_names(self):
+        return [self.original_type_name]
+    
+    def get_all_types(self) -> list[Type]:
+        return [self.cursor.type.get_canonical()]
+    
+class STLContainerBindingInfo(BindingInfo):
+    def __init__(self, cursor, parent):
+        self.binding_type = ''
+        self.template_args = ''
+        super().__init__(cursor, parent)
+    def process(self):
+        self.binding_type = self.name.split('<')[0].split('::')[-1]
+        self.template_args = self.name.split('<')[1].split('>')[0]
+
+        argument_combined = ''.join(arg.strip().capitalize() for arg in self.template_args.replace('::', '_').split(','))
+        self.name = self.binding_type.capitalize() + argument_combined
+        pass
+    def get_binding_type(self):
+        return self.binding_type
+
+    def get_binding_prefix(self):
+        return ''
+    
+    def get_binding_suffix(self):
+        return ';'
+    
+    def gather_binding_info(self):
+        return super().gather_binding_info() | {
+            'binding_type': self.binding_type,
+            'template_args': self.template_args,
+        }
+
+    def get_binding_template(self):
+        return '%(prefix)sregister_%(binding_type)s<%(template_args)s>("%(name)s")%(suffix)s'
 
 
 
@@ -241,7 +294,13 @@ class FunctionInfo(BindingInfo):
         
     def get_binding_type(self):
             return 'function'
-   
+    
+    def get_all_type_names(self):
+        return self.args + [self.return_type]
+    
+    def get_all_types(self) -> list[Type]:
+        return [self.cursor.result_type.get_canonical()] + [arg.type.get_canonical() for arg in self.cursor.get_arguments()]
+
     def gather_binding_info(self):
 
         # see: https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#raw-pointers
@@ -355,11 +414,22 @@ class Functions():
             bindings.append(function.get_binding(indent))
         return '\n'.join(bindings)
 
+# Iterate each function in a Functions object
+def FunctionBindingInfoIterator(functions:Functions):
+    for function in functions.functionIndexedByName.values():
+        for item in function.homonymic_functions:
+            yield item
 
 # see: https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#class-properties
 class ClassPropertyInfo(BindingInfo):
     def __init__(self, cursor, parent):
         super().__init__(cursor, parent)
+
+    def process(self):
+        super().process()
+        if self.type == 'void *':
+            self.should_be_ignored = True
+            self.ignored_reason = f'void pointer found in class property: {self.get_full_name()}'
 
     def get_binding_prefix(self):
         return '.'
@@ -443,18 +513,22 @@ class Constructors(Functions):
 
     def get_binding(self, indent):
         return super().get_binding(indent)
+    
        
 class ClassInfo(BindingInfo):
     def __init__(self, cursor, parent):
         self.constructors = Constructors()
         self.methods = Functions()
-        self.fields = []
-        self.enums = []
-        self.structs = []
-        self.classes = []
-        self.static_values = []
+        self.fields:list[ClassPropertyInfo] = []
+        self.enums:list[EnumInfo] = []
+        self.structs:list[StructInfo] = []
+        self.classes:list[ClassInfo] = []
+        self.static_values:list[ClassStaticValueInfo] = []
+        self.type_defs:list[TypeDefInfo] = []
+
         self.is_derived = False
         self.base_class_name = ''
+
         
         super().__init__(cursor, parent)
 
@@ -489,13 +563,14 @@ class ClassInfo(BindingInfo):
                 self.structs.append(StructInfo(child, self))
             elif child.kind == CursorKind.CLASS_DECL:
                 self.classes.append(ClassInfo(child, self))
+            elif child.kind == CursorKind.TYPEDEF_DECL:
+                self.type_defs.append(TypeDefInfo(child, self))
             elif child.kind == CursorKind.FUNCTION_TEMPLATE:
                 print( f'Function template not yet supported: {child.displayname} in {self.name}')
             elif child.kind == CursorKind.CXX_ACCESS_SPEC_DECL:
                 pass
             else:
                 print(f'Ignored item: kind: {child.kind}, name: {child.displayname}, in class: {self.name}')
-
 
     # Unnest the nested classes and structs and enums
     def unnest_to_namespace(self, namespace):
@@ -540,14 +615,11 @@ class ClassInfo(BindingInfo):
             # # using original name
             # return '%(prefix)s%(binding_type)s<%(type)s>("%(name)s")%(suffix)s'
 
-    
     def get_binding(self, indent):
         spaces = ' ' * indent * 4
         bindings = []
         
-
         bindings.append(super().get_binding(indent))
-
 
         # Static values
         for static_value in self.static_values:
@@ -581,7 +653,33 @@ class ClassInfo(BindingInfo):
         bindings.append(f'{spaces};')
         
         return '\n'.join(bindings)
-    
+
+def ClassBindingInfoIterator(classInfo:ClassInfo):
+    # plane members
+    for item in classInfo.fields:
+        yield item
+    for item in classInfo.static_values:
+        yield item
+    for item in classInfo.enums:
+        yield item
+    for item in classInfo.type_defs:
+        yield item
+
+    # methods
+    for func in FunctionBindingInfoIterator(classInfo.constructors):
+        yield func
+    for func in FunctionBindingInfoIterator(classInfo.methods):
+        yield func
+
+    # nested classes and structs
+    for nested_struct in classInfo.structs:
+        for item in ClassBindingInfoIterator(nested_struct):
+            yield item
+    for nested_class in classInfo.classes:
+        for item in ClassBindingInfoIterator(nested_class):
+            yield item
+
+# NOT USED
 # see: https://emscripten.org/docs/api_reference/bind.h.html#_CPPv4N12value_object5fieldEPKcM12InstanceType9FieldType
 class StructFieldInfo(ClassPropertyInfo):
     def __init__(self, cursor, parent):
@@ -613,8 +711,10 @@ class NamespaceInfo(BindingInfo):
     def __init__(self, cursor, parent, project_dir):
         self.project_dir = project_dir
 
+        self.type_defs:list[TypeDefInfo] = []
         self.definations:list[BindingInfo] = []
         self.namespaces:dict[str, NamespaceInfo] = {}
+
         super().__init__(cursor, parent)
 
     
@@ -646,6 +746,8 @@ class NamespaceInfo(BindingInfo):
                     bindingInfo = StructInfo(child, parent)
                 elif child.kind == CursorKind.ENUM_DECL:
                     bindingInfo = EnumInfo(child, parent)
+                elif child.kind == CursorKind.TYPEDEF_DECL:
+                    self.type_defs.append(TypeDefInfo(child, parent))
                 elif child.kind == CursorKind.CXX_ACCESS_SPEC_DECL:
                     bindingInfo = None
 
@@ -701,8 +803,29 @@ class NamespaceInfo(BindingInfo):
         bindings.append(f'{spaces}}} // namespace {self.name}')
         return '\n'.join(bindings)
 
-    
-    
+def NamespaceBindingInfoIterator(namespace:NamespaceInfo):
+    # plane members
+    for item in namespace.type_defs:
+        yield item
+
+    for item in namespace.definations:
+        if isinstance(item, ClassInfo):
+            for class_item in ClassBindingInfoIterator(item):
+                yield class_item
+        elif isinstance(item, Functions):
+            for function_item in FunctionBindingInfoIterator(item):
+                yield function_item
+        else:
+            yield item
+
+    # nested namespaces
+    for nested_namespace in namespace.namespaces.values():
+        for item in NamespaceBindingInfoIterator(nested_namespace):
+            yield item  
+
+
+
+
 class ProjectInfo(NamespaceInfo):
     def __init__(self, headers:list, dest_dir, parse_args=['-x', 'c++', '-std=c++17']):
         self.headers = headers
@@ -710,6 +833,7 @@ class ProjectInfo(NamespaceInfo):
         self.parse_args = parse_args
 
         self.includes = []
+        self.stl_containers:list[STLContainerBindingInfo] = []
 
         fake_cursor = SimpleNamespace(spelling='MainModule', type=SimpleNamespace(spelling='root'), kind='root', displayname='root',)
         fake_cursor.canonical = fake_cursor
@@ -724,6 +848,15 @@ class ProjectInfo(NamespaceInfo):
 
             relative_path = os.path.relpath(header, self.dest_dir)
             self.includes.append(relative_path)
+
+        bumper = ProjectBindingInfoPump(self)
+        bumper.add_filter('STLContainerFilter', STLContainerFilter())
+        bumper.pump()
+
+        stl_container_filter:STLContainerFilter = bumper.get_filter('STLContainerFilter')
+        for type in stl_container_filter.types_can_be_registered.values():
+            bindingInfo = STLContainerBindingInfo(type, self)
+            self.stl_containers.append(bindingInfo)
 
     def flatten(self):
         for ns in self.namespaces.values():
@@ -746,9 +879,17 @@ class ProjectInfo(NamespaceInfo):
         # Start of embind bindings
         bindings.append(f'\n{spaces}EMSCRIPTEN_BINDINGS({self.name}) {{')
 
+        # Add bindings for STL containers
+        bindings.append(f'{spaces}// STL containers')
+        for stl_container in self.stl_containers:
+            bindings.append(stl_container.get_binding(indent + 1))
+        bindings.append(f'{spaces}// End of STL containers\n')
+
         # Add bindings for definitions in the project
+        bindings.append(f'{spaces}// definitions')
         for definition in self.definations:
             bindings.append(definition.get_binding(indent + 1))
+        bindings.append(f'{spaces}// End of definitions\n')
 
         # Add bindings for nested namespaces
         for namespace in self.namespaces.values():
@@ -758,6 +899,58 @@ class ProjectInfo(NamespaceInfo):
         bindings.append(f'{spaces}}}\n')
 
         return '\n'.join(bindings)
+
+
+
+    
+# Base class for binding info filters
+class BindingInfoFilter:
+    def __init__(self):
+        pass
+    def filter(self, bindingInfo:BindingInfo):
+        pass
+
+# Iterate BindingInfo in a project
+class ProjectBindingInfoPump:
+    def __init__(self, project:ProjectInfo):
+        self.project = project
+        self.filters:dict[str, BindingInfoFilter] = {}
+
+    def add_filter(self, filter_name:str, filter:BindingInfoFilter):
+        self.filters[filter_name] = filter
+
+    def get_filter(self, filter_name:str):
+        if filter_name in self.filters:
+            return self.filters[filter_name]
+        else:
+            return None
+
+    def pump(self):
+        for item in NamespaceBindingInfoIterator(self.project):
+            for filter in self.filters.values():
+                filter.filter(item)
+
+# filters types using supported stl containers
+class STLContainerFilter(BindingInfoFilter):    
+    def __init__(self):
+        self.stl_containers_can_be_registered = [
+            'std::vector',
+            'std::map',
+        ]
+
+        self.types_can_be_registered:dict[str, Type] = {}
+
+        super().__init__()
+    def filter(self, bindingInfo:BindingInfo):
+        for stl_type in self.stl_containers_can_be_registered:
+            for binding_type in bindingInfo.get_all_types():
+                if stl_type in binding_type.spelling:
+                    if binding_type.kind in (TypeKind.LVALUEREFERENCE, TypeKind.RVALUEREFERENCE):
+                        binding_type = binding_type.get_pointee()
+                    self.types_can_be_registered[binding_type.spelling] = binding_type
+                    pass
+
+
 
 
 def copy_files(src_dir, dest_dir):
@@ -790,7 +983,10 @@ def main():
                 headers.append(path)
                 
     project_info = ProjectInfo(headers, dest_dir)
-    project_info.flatten()    
+    project_info.flatten()
+    
+    
+
     binding_content = project_info.get_binding(0)
     with open(os.path.join(dest_dir, 'embind_bindings.cpp'), 'w') as f:
         f.write(binding_content)
