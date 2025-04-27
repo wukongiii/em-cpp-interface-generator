@@ -55,7 +55,7 @@ class BindingInfo:
         mangeled_name = self.get_mangling_prefix() + self.name
         parent_name = self.parent.get_mangled_name()
         if not parent_name == '':
-            mangeled_name = parent_name + '::' + mangeled_name
+            mangeled_name = parent_name + '__' + mangeled_name
         return mangeled_name
 
     def get_name(self):
@@ -196,7 +196,8 @@ class FunctionInfo(BindingInfo):
 
     def process(self):
         self.return_type = self.cursor.result_type.spelling
-        self.args = [arg.type.spelling for arg in self.cursor.get_arguments()]
+        
+        self.args = [arg.type.get_canonical().spelling for arg in self.cursor.get_arguments()]
         self.is_static = self.cursor.storage_class == StorageClass.STATIC
         
     def get_binding_type(self):
@@ -305,7 +306,7 @@ class Functions():
 
 
 # see: https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#class-properties
-class ClassFieldInfo(BindingInfo):
+class ClassPropertyInfo(BindingInfo):
     def __init__(self, cursor, parent):
         super().__init__(cursor, parent)
 
@@ -423,9 +424,12 @@ class ClassInfo(BindingInfo):
             elif child.kind == CursorKind.VAR_DECL and child.storage_class == StorageClass.STATIC:
                 self.static_values.append(ClassStaticValueInfo(child, self))
             elif child.kind == CursorKind.FIELD_DECL:
-                self.fields.append(ClassFieldInfo(child, self))
+                self.fields.append(ClassPropertyInfo(child, self))
             elif child.kind == CursorKind.CXX_METHOD:
-                self.methods.add_function(ClassMethodInfo(child, self))
+                if child.storage_class == StorageClass.STATIC:
+                    self.methods.add_function(ClassStaticMethodInfo(child, self))
+                else:
+                    self.methods.add_function(ClassMethodInfo(child, self))
             elif child.kind == CursorKind.ENUM_DECL:
                 self.enums.append(EnumInfo(child, self))
             elif child.kind == CursorKind.STRUCT_DECL:
@@ -525,6 +529,23 @@ class ClassInfo(BindingInfo):
         
         return '\n'.join(bindings)
     
+# see: https://emscripten.org/docs/api_reference/bind.h.html#_CPPv4N12value_object5fieldEPKcM12InstanceType9FieldType
+class StructFieldInfo(ClassPropertyInfo):
+    def __init__(self, cursor, parent):
+        super().__init__(cursor, parent)
+
+    def get_binding_prefix(self):
+        return '.'
+    def get_binding_type(self):
+        return 'field'
+    
+    # .field("FieldName", &StructName::FieldName)
+    def get_binding_template(self):
+        # return '%(prefix)s%(binding_type)s("%(name)s", &%(full_name)s)'
+        return super().get_binding_template()
+    
+    
+# see: https://emscripten.org/docs/api_reference/bind.h.html#value-structs
 class StructInfo(ClassInfo):
     def __init__(self, cursor, parent):
         super().__init__(cursor, parent)
@@ -532,8 +553,8 @@ class StructInfo(ClassInfo):
     def get_mangling_prefix(self):
         return 'S_'
     
-    def get_binding_type(self):
-        return 'value_object'
+    # def get_binding_type(self):
+    #     return 'value_object'
     
 class NamespaceInfo(BindingInfo):
     def __init__(self, cursor, parent, project_dir):
