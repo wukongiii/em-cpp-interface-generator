@@ -39,6 +39,9 @@ class BindingInfo:
         self.displayname= cursor.displayname
         self.is_template_instance = self.displayname.endswith('>')
 
+        self.should_be_ignored = False
+        self.ignored_reason = ''
+
         self.indent_space = 4
 
         self.process()
@@ -95,6 +98,9 @@ class BindingInfo:
     def get_binding_template(self):
         return '%(prefix)s%(binding_type)s("%(name)s", &%(full_name)s)%(suffix)s'
     
+    def comment_content(self, content):
+        return f'/*{content}*/'
+    
     def get_binding(self, indent = 0):
         spaces = ' ' * (indent * self.indent_space)
 
@@ -102,8 +108,19 @@ class BindingInfo:
         binding_info = self.gather_binding_info()
         binding_content = template % binding_info
 
-        binding = f'{spaces}{binding_content}'
-        return binding
+        if self.should_be_ignored:
+            binding_content = self.comment_content(binding_content)
+            reason = f'Ignored binding due to: {self.ignored_reason}'
+            binding_content = f'// {reason}\n' + binding_content
+            print(reason)
+
+        # Add spaces for each line
+        lines = binding_content.split('\n')
+        lines = [f'{spaces}{line}' for line in lines]
+        binding_content = '\n'.join(lines)
+
+        # binding = f'{spaces}{binding_content}'
+        return binding_content
 
 
 
@@ -192,13 +209,22 @@ class FunctionInfo(BindingInfo):
         self.is_static = False
         self.is_overloaded = False
 
+        self.hasVoidPointer = False
+
         super().__init__(cursor, parent)
 
     def process(self):
-        self.return_type = self.cursor.result_type.spelling
-        
-        self.args = [arg.type.get_canonical().spelling for arg in self.cursor.get_arguments()]
         self.is_static = self.cursor.storage_class == StorageClass.STATIC
+
+        self.return_type = self.cursor.result_type.spelling
+        self.args = [arg.type.get_canonical().spelling for arg in self.cursor.get_arguments()]
+        self.hasVoidPointer = any(arg == 'void *' for arg in self.args) or self.return_type == 'void *'
+        
+        if  self.hasVoidPointer:
+            self.should_be_ignored = True
+            self.ignored_reason = f'void pointer found in function(embind does not support) : {self.get_full_name()}'
+          
+        
         
     def get_binding_type(self):
             return 'function'
@@ -421,6 +447,8 @@ class ClassInfo(BindingInfo):
                 pass
             elif child.kind == CursorKind.CONSTRUCTOR:
                 self.constructors.add_function(ConstructorInfo(child, self))
+            elif child.kind == CursorKind.DESTRUCTOR:
+                pass
             elif child.kind == CursorKind.VAR_DECL and child.storage_class == StorageClass.STATIC:
                 self.static_values.append(ClassStaticValueInfo(child, self))
             elif child.kind == CursorKind.FIELD_DECL:
@@ -441,7 +469,7 @@ class ClassInfo(BindingInfo):
             elif child.kind == CursorKind.CXX_ACCESS_SPEC_DECL:
                 pass
             else:
-                print(f'Ignored in class: {child.kind} name:{child.displayname} in {self.name}')
+                print(f'Ignored item: kind: {child.kind}, name: {child.displayname}, in class: {self.name}')
 
 
     # Unnest the nested classes and structs and enums
@@ -597,7 +625,7 @@ class NamespaceInfo(BindingInfo):
                     bindingInfo = None
 
                 else:
-                    print(f'Ignored in structure: {child.kind} in {child.spelling}')
+                    print(f'Ignored item: kind: {child.kind}, name: {child.spelling}, in file: {child.location.file.name}')
                 
                 if bindingInfo is not None:
                     definations.append(bindingInfo)
