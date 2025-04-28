@@ -13,7 +13,7 @@ Both of them need to write something to tell Emscripten how to expose C++ code t
 
 This tool is for generating the intermediate files for WebIDL and Embind.
 
-- For WebIDL, it generates a `.idl` file.
+- For WebIDL, it generates a `.idl` file.(Planning...)
 - For Embind, it generates a `.cpp` file.
 
 ## Best practices

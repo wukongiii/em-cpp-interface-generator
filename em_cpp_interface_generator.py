@@ -51,6 +51,14 @@ class BindingInfo:
     def is_top_level(self):
         return isinstance(self.parent, ProjectInfo)
     
+    def get_name(self):
+        return self.name
+    
+    def get_full_name(self):
+        if self.is_top_level():
+            return self.name
+        return self.parent.get_full_name() + '::' + self.name
+    
     def get_mangling_prefix(self):
         return ''
     
@@ -61,14 +69,7 @@ class BindingInfo:
             mangeled_name = parent_name + '__' + mangeled_name
         return mangeled_name
 
-    def get_name(self):
-        return self.name
-    
-    def get_full_name(self):
-        if self.is_top_level():
-            return self.name
-        return self.parent.get_full_name() + '::' + self.name
-    
+
     def get_type(self):
         return self.type
 
@@ -150,13 +151,18 @@ class STLContainerBindingInfo(BindingInfo):
     def __init__(self, cursor, parent):
         self.binding_type = ''
         self.template_args = ''
+        self.arguments_combined = ''
+
         super().__init__(cursor, parent)
     def process(self):
+        # sdt::vector<int, float> -> vector
         self.binding_type = self.name.split('<')[0].split('::')[-1]
+        # sdt::vector<int, float> -> int, float
         self.template_args = self.name.split('<')[1].split('>')[0]
-
-        argument_combined = ''.join(arg.strip().capitalize() for arg in self.template_args.replace('::', '_').split(','))
-        self.name = self.binding_type.capitalize() + argument_combined
+        # vector<int, float> -> IntFloat
+        self.argument_combined = ''.join(arg.strip().capitalize() for arg in self.template_args.replace('::', '__').split(','))
+        # vector<int, float> -> VectorIntFloat
+        self.name = self.argument_combined
         pass
     def get_binding_type(self):
         return self.binding_type
@@ -167,14 +173,29 @@ class STLContainerBindingInfo(BindingInfo):
     def get_binding_suffix(self):
         return ';'
     
+    def get_mangling_prefix(self):
+        if self.binding_type == 'vector':
+            return 'STL__V_'
+        elif self.binding_type =='map':
+            return 'STL__M_'
+        elif self.binding_type =='set':
+            return 'STL__S_'
+        elif self.binding_type =='unordered_map':
+            return 'STL__UM_'
+        elif self.binding_type =='unordered_set':
+            return 'STL__US_'
+        else:
+            return 'UNKNOWN__'
+
     def gather_binding_info(self):
         return super().gather_binding_info() | {
             'binding_type': self.binding_type,
             'template_args': self.template_args,
         }
 
+
     def get_binding_template(self):
-        return '%(prefix)sregister_%(binding_type)s<%(template_args)s>("%(name)s")%(suffix)s'
+        return '%(prefix)sregister_%(binding_type)s<%(template_args)s>("%(mangled_name)s")%(suffix)s'
 
 
 
@@ -204,6 +225,9 @@ class EnumInfo(BindingInfo):
     
     def get_binding_type(self):
         return 'enum_'
+
+    def get_mangling_prefix(self):
+        return 'E_'
     
     def get_binding_template(self):
         # using mangled name to avoid name conflict
