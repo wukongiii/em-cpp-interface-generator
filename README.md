@@ -1,18 +1,20 @@
 
-# Embind Generator Documentation
-
-# What is Embind Generator?
+# What for?
 
 [Emscripten](https://emscripten.org/docs/introducing_emscripten/about_emscripten.html) supports [two](https://emscripten.org/docs/porting/connecting_cpp_and_javascript/index.html) ways to expose C++ code to JavaScript:
 
 - [Embind](https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html)
 - [WebIDL Bindings](https://emscripten.org/docs/porting/connecting_cpp_and_javascript/WebIDL-Binder.html)
 
-While the WebIDL uses [/tools/webidl_binder.py](https://emscripten.org/docs/porting/connecting_cpp_and_javascript/WebIDL-Binder.html#generating-the-bindings-glue-code) to generate the IDL file, but there is no such an 'embinder tool' for generating embind file.
+Both of them need to write something to tell Emscripten how to expose C++ code to JavaScript. Ref : [Binding C++ and JavaScript — WebIDL Binder and Embind](https://emscripten.org/docs/porting/connecting_cpp_and_javascript/Interacting-with-code.html#binding-c-and-javascript-webidl-binder-and-embind)
 
-[Compare to WebIDL](https://emscripten.org/docs/porting/connecting_cpp_and_javascript/Interacting-with-code.html#binding-c-and-javascript-webidl-binder-and-embind),the embind is complacated and it can support subtle controls for exporting better Javascript code, thus beyond writing those formulaic binding tempaltes, it sometimes needs to add additional tags to the C++ code, especially when you want to call the Javascript functions from C++.
+- For WebIDL, you need to write a `.idl` file and then to [generate it's glue files](https://emscripten.org/docs/porting/connecting_cpp_and_javascript/WebIDL-Binder.html#generating-the-bindings-glue-code). Compile the glue files together with the source code to generate final outputs.
+- For Embind, you need to write an binding `.cpp` file, then compile it with the source code also.
 
-The Embind Generator is a tool to generate those formulaic bindings for you. It's purpose is to make the process of generating embind bindings easier and more convenient, but it's not a solution for the whole embind system. 
+This tool is for generating the intermediate files for WebIDL and Embind.
+
+- For WebIDL, it generates a `.idl` file.
+- For Embind, it generates a `.cpp` file.
 
 ## Best practices
 
