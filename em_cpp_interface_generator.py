@@ -5,6 +5,7 @@ from clang.cindex import Type, Index, Cursor, CursorKind, TypeKind, AccessSpecif
 from types import SimpleNamespace
 from enum import Enum
 
+# region ====== Configuration ======
 # see: https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#object-ownership
 class FunctionReturnValuePolicy(Enum):
     DEFAULT = 0
@@ -26,8 +27,11 @@ class ProjectConfig:
 
 projectConfig = ProjectConfig()
 
+# endregion
 
-# Base binding information class
+
+# region ============= Binding Generation ==============
+# Base binding class
 class BindingInfo:
     def __init__(self, cursor, parent):
         self.cursor = cursor
@@ -51,14 +55,31 @@ class BindingInfo:
     def is_top_level(self):
         return isinstance(self.parent, ProjectInfo)
     
+    # region ====== Names ======
     def get_name(self):
         return self.name
     
+    def get_full_name_template(self):
+        return '%(parent_name)s%(level_seperator)s%(name)s'
+
+    def get_level_seperator(self):
+        return '::'
+
     def get_full_name(self):
         if self.is_top_level():
             return self.name
-        return self.parent.get_full_name() + '::' + self.name
+
+        full_name_template = self.get_full_name_template()
+        full_name_info = {
+            'parent_name': self.parent.get_full_name(),
+            'level_seperator': self.get_level_seperator(),
+            'name': self.name,
+        }
+        return full_name_template % full_name_info
     
+    # endregion
+
+    # region ====== Mangled name ======
     def get_mangling_prefix(self):
         return ''
     
@@ -69,7 +90,9 @@ class BindingInfo:
             mangeled_name = parent_name + '__' + mangeled_name
         return mangeled_name
 
+    # endregion
 
+    # region ====== Types ======
     def get_type(self):
         return self.type
 
@@ -84,6 +107,9 @@ class BindingInfo:
     def get_binding_type(self):
         return 'UNKNOWN'
     
+    # endregion
+
+    # region ====== Binding ======
     def get_binding_prefix(self):
         return ''
     
@@ -131,7 +157,10 @@ class BindingInfo:
         # binding = f'{spaces}{binding_content}'
         return binding_content
 
+    # endregion
 
+
+# Class for TypeDef
 class TypeDefInfo(BindingInfo):
     def __init__(self, cursor, parent):
         self.original_type_name = ''
@@ -147,6 +176,7 @@ class TypeDefInfo(BindingInfo):
     def get_all_types(self) -> list[Type]:
         return [self.cursor.type.get_canonical()]
     
+# Class for STL containers like vector, map, set, etc.
 class STLContainerBindingInfo(BindingInfo):
     def __init__(self, cursor, parent):
         self.binding_type = ''
@@ -198,7 +228,7 @@ class STLContainerBindingInfo(BindingInfo):
         return '%(prefix)sregister_%(binding_type)s<%(template_args)s>("%(mangled_name)s")%(suffix)s'
 
 
-
+# Class for EnumValue
 class EnumValueInfo(BindingInfo):
     def __init__(self, cursor, parent):
         super().__init__(cursor, parent)
@@ -213,7 +243,7 @@ class EnumValueInfo(BindingInfo):
     def get_binding_template(self):
         return '.%(binding_type)s("%(name)s", %(type)s::%(name)s)'
 
-
+# Class for Enum
 class EnumInfo(BindingInfo):
     def __init__(self, cursor, parent):
         self.values = []
@@ -237,7 +267,6 @@ class EnumInfo(BindingInfo):
         #return '.%(binding_type)s<%(type)s>("%(name)s")'
         
         
-        
     def get_binding(self, indent=0):
         spaces = ' ' * (indent * self.indent_space)
 
@@ -249,6 +278,7 @@ class EnumInfo(BindingInfo):
         return '\n'.join(bindings)
 
 
+# Class for constants
 # see: https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#constants
 class ConstantValueInfo(BindingInfo):
     def __init__(self, cursor, parent):
@@ -272,13 +302,7 @@ class StaticValueInfo(BindingInfo):
     
 
 
-## A non-overloaded function binding is like:
-# function("ClassName", &ClassName::FunctionName);
-
-## An overloaded function binding is like:
-# function("ClassName", select_overload<void(int)>(&ClassName::FunctionName));
-
-# see https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#overloaded-functions
+# Class for functions
 class FunctionInfo(BindingInfo):
     def __init__(self, cursor, parent):
         self.return_type = ''
@@ -346,6 +370,15 @@ class FunctionInfo(BindingInfo):
             'signature': self.type,
             'pointer_policy': pointer_policy,
         }
+
+
+    ## A non-overloaded function binding is like:
+    # function("ClassName", &ClassName::FunctionName);
+
+    ## An overloaded function binding is like:
+    # function("ClassName", select_overload<void(int)>(&ClassName::FunctionName));
+
+    # see https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#overloaded-functions
 
     def get_binding_template(self):
         if self.is_overloaded:
@@ -991,7 +1024,7 @@ class STLContainerFilter(BindingInfoFilter):
                     pass
 
 
-
+# endregion ========= Binding generation =========
 
 def copy_files(src_dir, dest_dir):
     if os.path.exists(dest_dir):
