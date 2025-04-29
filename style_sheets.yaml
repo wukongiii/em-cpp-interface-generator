@@ -1,0 +1,99 @@
+---
+# For embind
+MetaInfo:
+  indent_space: 4
+  full_name_template: '%(parent_name)s%(seperator)s%(ast_name)s'
+  full_name_seperator: '::'
+  mangling_template: '%(parent_mangled_name)s%(seperator)s%(type_prefix)s%(self_mangled_name)s'
+  mangling_seperator: '__'
+  mangling_prefix: ''
+  tagging_prefix: ''
+  tagging_suffix: ''
+  tagging_type: 'UNKNOWN'
+  tagging_template: '%(prefix)s%(tagging_type)s("%(tagging_name)s", &%(full_name)s)%(suffix)s'
+  comment_template: '/*%(content)s*/'
+
+STLContainerMeta:
+  tagging_prefix: ''
+  tagging_suffix: ';'
+  mangling_prefix: 
+    vector: 'STL__V_'
+    map: 'STL__M_'
+    unordered_map: 'STL__UM_'
+    set: 'STL__S_'
+    unordered_set: 'STL__US_'
+  tagging_template: '%(prefix)sregister_%(tagging_type)s<%(template_args)s>("%(mangled_name)s")%(suffix)s'
+
+EnumValueMeta:
+  tagging_type: 'value'
+  tagging_template: '.%(tagging_type)s("%(tagging_name)s", %(type_name)s::%(ast_name)s)'
+
+EnumMeta:
+  tagging_type: 'enum_'
+  mangling_prefix: 'E_'
+  tagging_template: '%(prefix)s%(tagging_type)s<%(type_name)s>("%(mangled_name)s")%(suffix)s'
+
+ConstantValueMeta:
+  tagging_type: 'constant'
+  tagging_suffix: ';'
+  tagging_template: '%(prefix)s%(tagging_type)s("%(tagging_name)s", %(full_name)s)%(suffix)s'
+
+FunctionMeta:
+  tagging_type: 'function'
+  tagging_suffix: ';'
+  tagging_template: 
+    non_overloaded: '%(prefix)s%(tagging_type)s("%(tagging_name)s", &%(full_name)s%(pointer_policy)s)%(suffix)s'
+    overloaded: '%(prefix)s%(tagging_type)s("%(tagging_name)s", select_overload<%(signature)s>(&%(full_name)s)%(pointer_policy)s)%(suffix)s'
+
+ClassPropertyMeta:
+  tagging_prefix: '.'
+  tagging_type: 'property'
+  tagging_template: '%(prefix)s%(tagging_type)s("%(tagging_name)s", &%(full_name)s)%(suffix)s'
+  return_value_policy: 'return_value_policy::reference()'
+  tagging_template: '%(prefix)s%(tagging_type)s("%(tagging_name)s", &%(full_name)s, %(return_value_policy)s)'
+
+ClassStaticValueMeta:
+  tagging_type: 'class_property'
+  tagging_prefix: '.'
+
+ClassMethodMeta:
+  tagging_prefix: '.'
+  tagging_suffix: ''
+
+ClassStaticMethodMeta:
+  tagging_type: 'class_function'
+
+ConstructorMeta:
+  tagging_type: 'constructor'
+  tagging_template: '%(prefix)s%(tagging_type)s<%(args)s>()'
+
+ClassMeta:
+  tagging_type: 'class_'
+  mangling_prefix: 'C_'
+  tagging_template: 
+    derived: '%(prefix)s%(tagging_type)s<%(type_name)s, base<%(base_class_name)s>>("%(mangled_name)s")%(suffix)s'
+    non_derived: '%(prefix)s%(tagging_type)s<%(type_name)s>("%(mangled_name)s")%(suffix)s'
+
+StructFieldMeta:
+  tagging_prefix: '.'
+  tagging_type: 'field'
+
+StructMeta:
+  mangling_prefix: 'S_'
+
+
+
+
+
+
+
+---
+# For pre.js
+
+
+---
+# For .d.ts
+
+
+---
+# For WebIDL

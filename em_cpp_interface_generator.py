@@ -29,6 +29,37 @@ projectConfig = ProjectConfig()
 
 # endregion
 
+# region ====== Style process ======
+import yaml
+
+style_sheets = {}
+current_style_sheet = {}
+def load_style_sheets():
+    global style_sheets
+
+    file = open('style_sheets.yaml', 'r')
+    styles = list(yaml.safe_load_all(file))
+    file.close()
+
+    style_sheets = {
+        'embind': styles[0], # for embind
+        'pre_js': styles[1], # for pre.js to unmangle the name and restore the structure
+        'd_ts': styles[2], # for d.ts to export the types
+        'webidl': styles[3], # for WebIDL
+    }
+
+def select_style_sheet(style_name):
+    global current_style_sheet
+    if style_sheets.get(style_name) == None:
+        raise KeyError('Style sheet %s not found' % style_name)
+
+    current_style_sheet = style_sheets[style_name]
+
+load_style_sheets()
+select_style_sheet('embind')
+
+# endregion
+
 
 # region ============= Meta process ==============
 # Base Meta class
@@ -47,59 +78,39 @@ class MetaInfo:
         self.should_be_ignored = False
         self.ignored_reason = ''
 
-        self.indent_space = 4
+        # self.indent_space = 4
 
         self.process()
-    def process(self):
-        pass
 
     def is_top_level(self):
         return isinstance(self.parent, ProjectInfo)
-    
-    # region ====== Names ======
 
-    # name from AST
-    def get_ast_name(self):
-        return self.ast_name
+    def process(self):
+        pass
 
-    # name for tagging the meta
-    def get_tagging_name(self):
-        return self.ast_name
-    
-
-    def get_full_name_template(self):
-        return '%(parent_name)s%(level_seperator)s%(ast_name)s'
-
-    def get_full_name_seperator(self):
-        return '::'
-
-    def get_full_name(self):
-        if self.is_top_level():
-            return self.get_ast_name()
-
-        full_name_template = self.get_full_name_template()
-        full_name_info = {
-            'parent_name': self.parent.get_full_name(),
-            'level_seperator': self.get_full_name_seperator(),
-            'ast_name': self.get_ast_name(),
-            'tagging_name': self.get_tagging_name(),
-        }
-        return full_name_template % full_name_info
-    
-    # endregion
-
-    # region ====== Mangled name ======
-    def get_mangling_prefix(self):
-        return ''
-    
-    def get_mangled_name(self):
-        mangeled_name = self.get_mangling_prefix() + self.get_ast_name()
-        parent_name = self.parent.get_mangled_name()
-        if not parent_name == '':
-            mangeled_name = parent_name + '__' + mangeled_name
-        return mangeled_name
+    # region ====== Style ======
+    def get_style(self, style_name):
+        # uses self's class name to find the style
+        style = current_style_sheet.get(self.__class__.__name__)
+        if style is not None and style_name in style:
+            return style.get(style_name)
+        
+        # not found, try parent's style
+        for base_class in self.__class__.__bases__:
+            if base_class is object:
+                continue
+                
+            base_class_name = base_class.__name__
+            parent_style = current_style_sheet.get(base_class_name)
+            if parent_style is not None and style_name in parent_style:
+                return parent_style.get(style_name)
+        
+        return None
 
     # endregion
+
+    def get_indent_space(self):
+        return self.get_style('indent_space') or 4
 
     # region ====== Types ======
     def get_type_name(self):
@@ -114,19 +125,77 @@ class MetaInfo:
         return [self.cursor.type]
     
     # endregion
+    
+    # region ====== Names ======
+
+    # name from AST
+    def get_ast_name(self):
+        return self.ast_name
+
+    # name for tagging the meta
+    def get_tagging_name(self):
+        return self.ast_name
+    
+    # full name
+    def get_full_name_template(self):
+        return self.get_style('full_name_template') or\
+             '%(parent_name)s%(seperator)s%(ast_name)s'
+
+    def get_full_name_seperator(self):
+        return self.get_style('full_name_seperator') or '::'
+
+    def get_full_name(self):
+        if self.is_top_level():
+            return self.get_ast_name()
+
+        full_name_template = self.get_full_name_template()
+        full_name_info = {
+            'parent_name': self.parent.get_full_name(),
+            'seperator': self.get_full_name_seperator(),
+            'ast_name': self.get_ast_name(),
+            'tagging_name': self.get_tagging_name(),
+        }
+        return full_name_template % full_name_info
+    
+    def get_mangling_template(self):
+        return self.get_style('mangling_template') or\
+             '%(parent_mangled_name)s%(seperator)s%(type_prefix)s%(self_mangled_name)s'
+
+    def get_mangling_seperator(self):
+        return self.get_style('mangling_seperator') or '__'
+
+    def get_mangling_prefix(self):
+        return self.get_style('mangling_prefix') or ''
+    
+    def get_mangled_name(self):
+        parent_mangled_name = self.parent.get_mangled_name()
+        mangling_template = self.get_mangling_template()
+        name_mangling_info = {
+            'parent_mangled_name': parent_mangled_name,
+            'self_mangled_name':self.get_ast_name(),
+            'seperator': self.get_mangling_seperator() if not parent_mangled_name == '' else '',
+            'type_prefix': self.get_mangling_prefix(),
+        }
+        mangeled_name = mangling_template % name_mangling_info
+        return mangeled_name
+
+    # endregion
+
+   
 
     # region ====== Tagging ======
     # UNKONWN("TaggingName", FullName)
     def get_tagging_template(self):
-        return '%(prefix)s%(tagging_type)s("%(tagging_name)s", &%(full_name)s)%(suffix)s'
+        return self.get_style('tagging_template') or\
+            '%(prefix)s%(tagging_type)s("%(tagging_name)s", &%(full_name)s)%(suffix)s'
 
     def get_tagging_prefix(self):
-        return ''
+        return self.get_style('tagging_prefix') or ''
     def get_tagging_type(self):
-        return 'UNKNOWN'
+        return self.get_style('tagging_type') or 'UNKNOWN'
     
     def get_tagging_suffix(self):
-        return ''
+        return self.get_style('tagging_suffix') or ''
     
     def gather_tagging_info(self):
         tagging_info = {
@@ -143,12 +212,16 @@ class MetaInfo:
         }
         return tagging_info
 
-    
+    def get_comment_template(self):
+        return self.get_style('comment_template') or\
+            '/*%(content)s*/'
     def comment_content(self, content):
-        return f'/*{content}*/'
+        comment_template = self.get_comment_template()
+        comment_content = comment_template % {'content': content}
+        return comment_content
     
     def tagging(self, indent = 0):
-        spaces = ' ' * (indent * self.indent_space)
+        spaces = ' ' * (indent * self.get_indent_space())
 
         template = self.get_tagging_template()
         tagging_info = self.gather_tagging_info()
@@ -207,26 +280,23 @@ class STLContainerMeta(MetaInfo):
     def get_tagging_type(self):
         return self.container_type
 
-    def get_tagging_prefix(self):
-        return ''
-    
     def get_tagging_suffix(self):
-        return ';'
+        return self.get_style('tagging_suffix') or ';'
     
     def get_mangling_prefix(self):
-        if self.container_type == 'vector':
-            return 'STL__V_'
-        elif self.container_type =='map':
-            return 'STL__M_'
-        elif self.container_type =='set':
-            return 'STL__S_'
-        elif self.container_type =='unordered_map':
-            return 'STL__UM_'
-        elif self.container_type =='unordered_set':
-            return 'STL__US_'
-        else:
-            return 'UNKNOWN__'
+        mangling_prefix = self.get_style('mangling_prefix') or {
+            'vector': 'STL__V_',
+            'map': 'STL__M_',
+            'set': 'STL__S_',
+            'unordered_map': 'STL__UM_',
+            'unordered_set': 'STL__US_',
+        }
+        return mangling_prefix.get(self.container_type) or 'UNKNOWN'
 
+    def get_tagging_template(self):
+        return self.get_style('tagging_template') or\
+            '%(prefix)sregister_%(tagging_type)s<%(template_args)s>("%(mangled_name)s")%(suffix)s'
+    
     def gather_tagging_info(self):
         return super().gather_tagging_info() | {
             'tagging_type': self.container_type,
@@ -234,12 +304,9 @@ class STLContainerMeta(MetaInfo):
         }
 
 
-    def get_tagging_template(self):
-        return '%(prefix)sregister_%(tagging_type)s<%(template_args)s>("%(mangled_name)s")%(suffix)s'
-
 
 # Class for EnumValue
-class EnumValueInfo(MetaInfo):
+class EnumValueMeta(MetaInfo):
     def __init__(self, cursor, parent):
         super().__init__(cursor, parent)
 
@@ -248,37 +315,35 @@ class EnumValueInfo(MetaInfo):
 
     # .value("EnumName", Enum::EnumValueName)
     def get_tagging_type(self):
-        return 'value'
+        return self.get_style('tagging_type') or 'value'
     
     def get_tagging_template(self):
-        return '.%(tagging_type)s("%(tagging_name)s", %(type_name)s::%(ast_name)s)'
+        return self.get_style('tagging_template') or\
+            '.%(tagging_type)s("%(tagging_name)s", %(type_name)s::%(ast_name)s)'
 
 # Class for Enum
-class EnumInfo(MetaInfo):
+class EnumMeta(MetaInfo):
     def __init__(self, cursor, parent):
         self.values = []
         super().__init__(cursor, parent)
     
     def process(self):
         for child in self.cursor.get_children():
-            self.values.append(EnumValueInfo(child, self))
+            self.values.append(EnumValueMeta(child, self))
     
     def get_tagging_type(self):
-        return 'enum_'
+        return self.get_style('tagging_type') or 'enum_'
 
     def get_mangling_prefix(self):
-        return 'E_'
+        return self.get_style('mangling_prefix') or 'E_'
     
     def get_tagging_template(self):
-        # using mangled name to avoid name conflict
-        return '%(tagging_type)s<%(type_name)s>("%(mangled_name)s")'
-    
-        ## using original name
-        #return '.%(tagging_type)s<%(type_name)s>("%(tagging_name)s")'
+        return self.get_style('tagging_template') or\
+            '%(prefix)s%(tagging_type)s<%(type_name)s>("%(mangled_name)s")%(suffix)s'
         
         
     def tagging(self, indent=0):
-        spaces = ' ' * (indent * self.indent_space)
+        spaces = ' ' * (indent * self.get_indent_space())
 
         taggings = [super().tagging(indent)]
         for value in self.values:
@@ -290,18 +355,19 @@ class EnumInfo(MetaInfo):
 
 # Class for constants
 # see: https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#constants
-class ConstantValueInfo(MetaInfo):
+class ConstantValueMeta(MetaInfo):
     def __init__(self, cursor, parent):
         super().__init__(cursor, parent)
 
     # constant("ConstantName", ConstantFullName);
     def get_tagging_type(self):
-        return 'constant'
+        return self.get_style('tagging_type') or 'constant'
     def get_tagging_suffix(self):
-        return ';'
+        return self.get_style('tagging_suffix') or ';'
     
     def get_tagging_template(self):
-        return '%(prefix)s%(tagging_type)s("%(tagging_name)s", %(full_name)s)%(suffix)s'
+        return self.get_style('tagging_template') or\
+            '%(prefix)s%(tagging_type)s("%(tagging_name)s", %(full_name)s)%(suffix)s'
 
     
 # A static value defined in a file or namespace usually should not be exposed, and embind does not directly support this.
@@ -313,7 +379,7 @@ class StaticValueInfo(MetaInfo):
 
 
 # Class for functions
-class FunctionInfo(MetaInfo):
+class FunctionMeta(MetaInfo):
     def __init__(self, cursor, parent):
         self.return_type = ''
         self.args = []
@@ -354,7 +420,7 @@ class FunctionInfo(MetaInfo):
         
         
     def get_tagging_type(self):
-            return 'function'
+        return self.get_style('tagging_type') or 'function'
     
     def get_all_type_names(self):
         return self.args + [self.return_type]
@@ -391,13 +457,16 @@ class FunctionInfo(MetaInfo):
     # see https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#overloaded-functions
 
     def get_tagging_template(self):
+        template = self.get_style('tagging_template') or {
+            'non_overloaded': '%(prefix)s%(tagging_type)s("%(tagging_name)s", &%(full_name)s%(pointer_policy)s)%(suffix)s',
+            'overloaded': '%(prefix)s%(tagging_type)s("%(tagging_name)s", select_overload<%(signature)s>(&%(full_name)s)%(pointer_policy)s)%(suffix)s'
+        }
         if self.is_overloaded:
-            return '%(prefix)s%(tagging_type)s("%(tagging_name)s", select_overload<%(signature)s>(&%(full_name)s)%(pointer_policy)s)%(suffix)s'
-        else:
-            return '%(prefix)s%(tagging_type)s("%(tagging_name)s", &%(full_name)s%(pointer_policy)s)%(suffix)s'
-        
+            return template['overloaded']
+        return template['non_overloaded']        
+
     def get_tagging_suffix(self):
-        return ';'
+        return self.get_style('tagging_suffix') or ';'
     
     def get_tagging_name(self):
         if self.ast_name.startswith('operator'):
@@ -448,9 +517,9 @@ class FunctionInfo(MetaInfo):
 # A class that stores functions with the same name. i.e. overloaded functions
 class FunctionHomonymic():
     def __init__(self):
-        self.homonymic_functions:list[FunctionInfo] = []
+        self.homonymic_functions:list[FunctionMeta] = []
 
-    def add_function(self, method: FunctionInfo, check_args_count = False):
+    def add_function(self, method: FunctionMeta, check_args_count = False):
         
         if len(self.homonymic_functions) > 0:
             method.is_overloaded = True
@@ -480,7 +549,7 @@ class Functions():
     def __init__(self):
         self.functionIndexedByName:dict[str, FunctionHomonymic] = {}
 
-    def add_function(self, function: FunctionInfo, check_args_count = False):
+    def add_function(self, function: FunctionMeta, check_args_count = False):
         if function.ast_name not in self.functionIndexedByName:
             self.functionIndexedByName[function.ast_name] = FunctionHomonymic()
         self.functionIndexedByName[function.ast_name].add_function(function, check_args_count)
@@ -501,7 +570,7 @@ def FunctionIterator(functions:Functions):
             yield item
 
 # see: https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#class-properties
-class ClassPropertyInfo(MetaInfo):
+class ClassPropertyMeta(MetaInfo):
     def __init__(self, cursor, parent):
         super().__init__(cursor, parent)
 
@@ -512,12 +581,13 @@ class ClassPropertyInfo(MetaInfo):
             self.ignored_reason = f'void pointer found in class property: {self.get_full_name()}'
 
     def get_tagging_prefix(self):
-        return '.'
+        return self.get_style('tagging_prefix') or '.'
     def get_tagging_type(self):
-        return 'property'
+        return self.get_style('tagging_type') or 'property'
     
     def get_return_value_policy(self):
-        return 'return_value_policy::reference()'
+        return self.get_style('return_value_policy') or\
+            'return_value_policy::reference()'
     
     def gather_tagging_info(self):
         return super().gather_tagging_info() | {
@@ -526,11 +596,12 @@ class ClassPropertyInfo(MetaInfo):
     
     # .property("FieldName", &ClassName::FieldName, return_value_policy::reference())
     def get_tagging_template(self):
-        return '%(prefix)s%(tagging_type)s("%(tagging_name)s", &%(full_name)s, %(return_value_policy)s)'
+        return self.get_style('tagging_template') or\
+            '%(prefix)s%(tagging_type)s("%(tagging_name)s", &%(full_name)s, %(return_value_policy)s)'
     
 
 # see: https://emscripten.org/docs/api_reference/bind.h.html#_CPPv4NK6class_14class_propertyEPKcP9FieldType
-class ClassStaticValueInfo(MetaInfo):
+class ClassStaticValueMeta(MetaInfo):
     def __init__(self, cursor, parent):
         super().__init__(cursor, parent)
         self.is_constant = False
@@ -543,14 +614,14 @@ class ClassStaticValueInfo(MetaInfo):
         return super().process()
 
     def get_tagging_type(self):
-            return 'class_property'
+        return self.get_style('tagging_type') or 'class_property'
     
     def get_tagging_prefix(self):
-        return '.'
+        return self.get_style('tagging_prefix') or '.'
     
 
 # .function("FunctionName", &ClassName::FunctionName)
-class ClassMethodInfo(FunctionInfo):
+class ClassMethodMeta(FunctionMeta):
     def __init__(self, cursor, parent):
         self.is_virtual = False
         self.is_pure_virtual = False
@@ -563,50 +634,51 @@ class ClassMethodInfo(FunctionInfo):
         self.is_pure_virtual = self.cursor.is_pure_virtual_method()
    
     def get_tagging_prefix(self):
-        return '.'
+        return self.get_style('tagging_prefix') or '.'
     
     def get_tagging_suffix(self):
-        return ''
+        return self.get_style('tagging_suffix') or ''
     
  # .class_function("FunctionName", &ClassName::FunctionName)
-class ClassStaticMethodInfo(ClassMethodInfo):
+class ClassStaticMethodMeta(ClassMethodMeta):
     def __init__(self, cursor, parent):
         super().__init__(cursor, parent)
 
     def get_tagging_type(self):
-        return 'class_function'
+        return self.get_style('tagging_type') or 'class_function'
     
                         
-class ConstructorInfo(ClassMethodInfo):
+class ConstructorMeta(ClassMethodMeta):
     def __init__(self, cursor, parent):
         super().__init__(cursor, parent)
 
     def get_tagging_type(self):
-        return 'constructor'
+        return self.get_style('tagging_type') or 'constructor'
         
     def get_tagging_template(self):
-        return '%(prefix)s%(tagging_type)s<%(args)s>()'
+        return self.get_style('tagging_template') or\
+            '%(prefix)s%(tagging_type)s<%(args)s>()'
    
 class Constructors(Functions):
     def __init__(self):
         super().__init__()
 
-    def add_function(self, function: FunctionInfo, check_args_count = True):
+    def add_function(self, function: FunctionMeta, check_args_count = True):
         super().add_function(function, check_args_count)
         
     def get_tagging(tagging, indent):
         return super().tagging(indent)
     
        
-class ClassInfo(MetaInfo):
+class ClassMeta(MetaInfo):
     def __init__(self, cursor, parent):
         self.constructors = Constructors()
         self.methods = Functions()
-        self.fields:list[ClassPropertyInfo] = []
-        self.enums:list[EnumInfo] = []
-        self.structs:list[StructInfo] = []
-        self.classes:list[ClassInfo] = []
-        self.static_values:list[ClassStaticValueInfo] = []
+        self.fields:list[ClassPropertyMeta] = []
+        self.enums:list[EnumMeta] = []
+        self.structs:list[StructMeta] = []
+        self.classes:list[ClassMeta] = []
+        self.static_values:list[ClassStaticValueMeta] = []
         self.type_defs:list[TypeDefMeta] = []
 
         self.is_derived = False
@@ -628,24 +700,24 @@ class ClassInfo(MetaInfo):
                 self.base_class_name = child.type.spelling
                 pass
             elif child.kind == CursorKind.CONSTRUCTOR:
-                self.constructors.add_function(ConstructorInfo(child, self))
+                self.constructors.add_function(ConstructorMeta(child, self))
             elif child.kind == CursorKind.DESTRUCTOR:
                 pass
             elif child.kind == CursorKind.VAR_DECL and child.storage_class == StorageClass.STATIC:
-                self.static_values.append(ClassStaticValueInfo(child, self))
+                self.static_values.append(ClassStaticValueMeta(child, self))
             elif child.kind == CursorKind.FIELD_DECL:
-                self.fields.append(ClassPropertyInfo(child, self))
+                self.fields.append(ClassPropertyMeta(child, self))
             elif child.kind == CursorKind.CXX_METHOD:
                 if child.storage_class == StorageClass.STATIC:
-                    self.methods.add_function(ClassStaticMethodInfo(child, self))
+                    self.methods.add_function(ClassStaticMethodMeta(child, self))
                 else:
-                    self.methods.add_function(ClassMethodInfo(child, self))
+                    self.methods.add_function(ClassMethodMeta(child, self))
             elif child.kind == CursorKind.ENUM_DECL:
-                self.enums.append(EnumInfo(child, self))
+                self.enums.append(EnumMeta(child, self))
             elif child.kind == CursorKind.STRUCT_DECL:
-                self.structs.append(StructInfo(child, self))
+                self.structs.append(StructMeta(child, self))
             elif child.kind == CursorKind.CLASS_DECL:
-                self.classes.append(ClassInfo(child, self))
+                self.classes.append(ClassMeta(child, self))
             elif child.kind == CursorKind.TYPEDEF_DECL:
                 self.type_defs.append(TypeDefMeta(child, self))
             elif child.kind == CursorKind.FUNCTION_TEMPLATE:
@@ -674,10 +746,10 @@ class ClassInfo(MetaInfo):
         self.structs = []
         
     def get_mangling_prefix(self):
-        return 'C_'
-    
+        return self.get_style('mangling_prefix') or 'C_'
+
     def get_tagging_type(self):
-        return 'class_'
+        return self.get_style('tagging_type') or 'class_'
 
     def gather_tagging_info(self):
        return super().gather_tagging_info() | {
@@ -685,18 +757,13 @@ class ClassInfo(MetaInfo):
         }
 
     def get_tagging_template(self):
+        template = self.get_style('tagging_template') or {
+            'derived': '%(prefix)s%(tagging_type)s<%(type_name)s, base<%(base_class_name)s>>("%(mangled_name)s")%(suffix)s',
+            'non_derived': '%(prefix)s%(tagging_type)s<%(type_name)s>("%(mangled_name)s")%(suffix)s'
+        }
         if self.is_derived:
-            # using mangled name
-            return '%(prefix)s%(tagging_type)s<%(type_name)s, base<%(base_class_name)s>>("%(mangled_name)s")%(suffix)s'
-            
-            # # using original name
-            # return '%(prefix)s%(tagging_type)s<%(type_name)s, base<%(base_class_name)s>>("%(tagging_name)s")%(suffix)s'
-        else:
-            # using mangled name
-            return '%(prefix)s%(tagging_type)s<%(type_name)s>("%(mangled_name)s")%(suffix)s'
-            
-            # # using original name
-            # return '%(prefix)s%(tagging_type)s<%(type_name)s>("%(tagging_name)s")%(suffix)s'
+            return template['derived']
+        return template['non_derived']
 
     def tagging(self, indent):
         spaces = ' ' * indent * 4
@@ -737,7 +804,7 @@ class ClassInfo(MetaInfo):
         
         return '\n'.join(taggings)
 
-def ClassMetaInfoIterator(classInfo:ClassInfo):
+def ClassMetaIterator(classInfo:ClassMeta):
     # plane members
     for item in classInfo.fields:
         yield item
@@ -756,22 +823,23 @@ def ClassMetaInfoIterator(classInfo:ClassInfo):
 
     # nested classes and structs
     for nested_struct in classInfo.structs:
-        for item in ClassMetaInfoIterator(nested_struct):
+        for item in ClassMetaIterator(nested_struct):
             yield item
     for nested_class in classInfo.classes:
-        for item in ClassMetaInfoIterator(nested_class):
+        for item in ClassMetaIterator(nested_class):
             yield item
 
 # NOT USED
 # see: https://emscripten.org/docs/api_reference/bind.h.html#_CPPv4N12value_object5fieldEPKcM12InstanceType9FieldType
-class StructFieldInfo(ClassPropertyInfo):
+class StructFieldMeta(ClassPropertyMeta):
     def __init__(self, cursor, parent):
         super().__init__(cursor, parent)
 
     def get_tagging_prefix(self):
-        return '.'
+        return self.get_style('tagging_prefix') or '.'
+
     def get_tagging_type(self):
-        return 'field'
+        return self.get_style('tagging_type') or 'field'
     
     # .field("FieldName", &StructName::FieldName)
     def get_tagging_template(self):
@@ -780,12 +848,12 @@ class StructFieldInfo(ClassPropertyInfo):
     
     
 # see: https://emscripten.org/docs/api_reference/bind.h.html#value-structs
-class StructInfo(ClassInfo):
+class StructMeta(ClassMeta):
     def __init__(self, cursor, parent):
         super().__init__(cursor, parent)
 
     def get_mangling_prefix(self):
-        return 'S_'
+        return self.get_style('mangling_prefix') or 'S_'
     
     # def get_tagging_type(self):
     #     return 'value_object'
@@ -818,17 +886,17 @@ class NamespaceInfo(MetaInfo):
 
                 if child.kind == CursorKind.VAR_DECL:
                     if child.type.is_const_qualified():
-                        metaInfo = ConstantValueInfo(child, parent)
+                        metaInfo = ConstantValueMeta(child, parent)
                     else:
                         metaInfo = None
                 elif child.kind == CursorKind.FUNCTION_DECL:
-                    metaInfo = FunctionInfo(child, parent)
+                    metaInfo = FunctionMeta(child, parent)
                 elif child.kind == CursorKind.CLASS_DECL:
-                    metaInfo = ClassInfo(child, parent)
+                    metaInfo = ClassMeta(child, parent)
                 elif child.kind == CursorKind.STRUCT_DECL:
-                    metaInfo = StructInfo(child, parent)
+                    metaInfo = StructMeta(child, parent)
                 elif child.kind == CursorKind.ENUM_DECL:
-                    metaInfo = EnumInfo(child, parent)
+                    metaInfo = EnumMeta(child, parent)
                 elif child.kind == CursorKind.TYPEDEF_DECL:
                     self.type_defs.append(TypeDefMeta(child, parent))
                 elif child.kind == CursorKind.CXX_ACCESS_SPEC_DECL:
@@ -848,10 +916,10 @@ class NamespaceInfo(MetaInfo):
 
     # flatten() is used to unnest the nested classes and structs
     def flatten(self):
-        classes:list[ClassInfo] = []
+        classes:list[ClassMeta] = []
         for _class in self.definations:
             # not class and not struct
-            if not isinstance(_class, ClassInfo):
+            if not isinstance(_class, ClassMeta):
                 continue
             
             classes.append(_class)
@@ -871,7 +939,7 @@ class NamespaceInfo(MetaInfo):
         mangled_name = 'N_' + self.cursor.spelling
         return self.parent.get_mangled_name() + mangled_name
     def tagging(self, indent):
-        spaces = ' ' * (indent * self.indent_space)
+        spaces = ' ' * (indent * self.get_indent_space())
         taggings = []
         taggings.append(f'{spaces}{{ using namespace {self.ast_name};')
         
@@ -892,8 +960,8 @@ def NamespaceMetaInfoIterator(namespace:NamespaceInfo):
         yield item
 
     for item in namespace.definations:
-        if isinstance(item, ClassInfo):
-            for class_item in ClassMetaInfoIterator(item):
+        if isinstance(item, ClassMeta):
+            for class_item in ClassMetaIterator(item):
                 yield class_item
         elif isinstance(item, Functions):
             for function_item in FunctionIterator(item):
@@ -949,7 +1017,7 @@ class ProjectInfo(NamespaceInfo):
         return ''
       
     def tagging(self, indent):
-        spaces = ' ' * (indent * self.indent_space)
+        spaces = ' ' * (indent * self.get_indent_space())
         taggings = []
 
         # Include headers
@@ -1037,6 +1105,9 @@ class STLContainerFilter(MetaInfoFilter):
 
 # endregion ========= Meta generation =========
 
+
+
+
 def copy_files(src_dir, dest_dir):
     if os.path.exists(dest_dir):
         shutil.rmtree(dest_dir)
@@ -1044,6 +1115,7 @@ def copy_files(src_dir, dest_dir):
 
 
 import argparse
+
 def main():
     parser = argparse.ArgumentParser(description='Embind generator')
     parser.add_argument('src_dir', type=str, help='Source directory')
@@ -1053,7 +1125,6 @@ def main():
     src_dir, dest_dir = args.src_dir, args.dest_dir
     src_dir = os.path.abspath(src_dir)
     dest_dir = os.path.abspath(dest_dir)
-
 
     # Step 1: Copy files
     # copy_files(src_dir, dest_dir)
