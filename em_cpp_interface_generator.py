@@ -35,18 +35,19 @@ import yaml
 style_sheets = {}
 current_style_sheet = {}
 def load_style_sheets():
-    global style_sheets
-
-    file = open('style_sheets.yaml', 'r')
-    styles = list(yaml.safe_load_all(file))
-    file.close()
-
     style_sheets = {
-        'embind': styles[0], # for embind
-        'pre_js': styles[1], # for pre.js to unmangle the name and restore the structure
-        'd_ts': styles[2], # for d.ts to export the types
-        'webidl': styles[3], # for WebIDL
+        'embind': None, # for embind
+        'pre_js': None, # for pre.js to unmangle the name and restore the structure
+        'd_ts': None, # for d.ts to export the types
+        'webidl': None, # for WebIDL
     }
+    
+    for name in style_sheets.keys():
+        with open(f'style_sheets/{name}.yaml', 'r') as file:
+            style = yaml.safe_load(file)
+            style_sheets[name] = style
+
+    return style_sheets
 
 def select_style_sheet(style_name):
     global current_style_sheet
@@ -55,7 +56,7 @@ def select_style_sheet(style_name):
 
     current_style_sheet = style_sheets[style_name]
 
-load_style_sheets()
+style_sheets = load_style_sheets()
 select_style_sheet('embind')
 
 # endregion
@@ -83,7 +84,7 @@ class MetaInfo:
         self.process()
 
     def is_top_level(self):
-        return isinstance(self.parent, ProjectInfo)
+        return isinstance(self.parent, ProjectMeta)
 
     def process(self):
         pass
@@ -219,6 +220,21 @@ class MetaInfo:
         comment_template = self.get_comment_template()
         comment_content = comment_template % {'content': content}
         return comment_content
+
+    def insert_to_each_line(self, content:str, pos, insertion):
+        lines = content.split('\n')
+        result_lines = []
+        
+        for line in lines:
+            actual_pos = pos
+            if pos < 0:
+                actual_pos = len(line) + pos
+                
+            actual_pos = max(0, min(actual_pos, len(line)))
+            new_line = line[:actual_pos] + insertion + line[actual_pos:]
+            result_lines.append(new_line)
+        
+        return '\n'.join(result_lines)
     
     def tagging(self, indent = 0):
         spaces = ' ' * (indent * self.get_indent_space())
@@ -858,13 +874,13 @@ class StructMeta(ClassMeta):
     # def get_tagging_type(self):
     #     return 'value_object'
     
-class NamespaceInfo(MetaInfo):
+class NamespaceMeta(MetaInfo):
     def __init__(self, cursor, parent, project_dir):
         self.project_dir = project_dir
 
         self.type_defs:list[TypeDefMeta] = []
         self.definations:list[MetaInfo] = []
-        self.namespaces:dict[str, NamespaceInfo] = {}
+        self.namespaces:dict[str, NamespaceMeta] = {}
 
         super().__init__(cursor, parent)
 
@@ -878,7 +894,7 @@ class NamespaceInfo(MetaInfo):
 
             if child.kind == CursorKind.NAMESPACE:
                 if parent.namespaces.get(child.spelling) is None:
-                    parent.namespaces[child.spelling] = NamespaceInfo(child, parent, project_dir)
+                    parent.namespaces[child.spelling] = NamespaceMeta(child, parent, project_dir)
                 else:
                     parent.namespaces[child.spelling].add_definations(child)
             else:
@@ -935,9 +951,9 @@ class NamespaceInfo(MetaInfo):
         for ns in self.namespaces.values():
             ns.flatten()
 
-    def get_mangled_name(self):
-        mangled_name = 'N_' + self.cursor.spelling
-        return self.parent.get_mangled_name() + mangled_name
+    def get_mangling_prefix(self):
+        return self.get_style('mangling_prefix') or 'N_'
+
     def tagging(self, indent):
         spaces = ' ' * (indent * self.get_indent_space())
         taggings = []
@@ -954,7 +970,7 @@ class NamespaceInfo(MetaInfo):
         taggings.append(f'{spaces}}} // namespace {self.ast_name}')
         return '\n'.join(taggings)
 
-def NamespaceMetaInfoIterator(namespace:NamespaceInfo):
+def NamespaceMetaInfoIterator(namespace:NamespaceMeta):
     # plane members
     for item in namespace.type_defs:
         yield item
@@ -977,7 +993,7 @@ def NamespaceMetaInfoIterator(namespace:NamespaceInfo):
 
 
 
-class ProjectInfo(NamespaceInfo):
+class ProjectMeta(NamespaceMeta):
     def __init__(self, headers:list, dest_dir, parse_args=['-x', 'c++', '-std=c++17']):
         self.headers = headers
         self.dest_dir = dest_dir
@@ -1063,7 +1079,7 @@ class MetaInfoFilter:
 
 # Iterate BindingInfo in a project
 class ProjectMetaInfoPump:
-    def __init__(self, project:ProjectInfo):
+    def __init__(self, project:ProjectMeta):
         self.project = project
         self.filters:dict[str, MetaInfoFilter] = {}
 
@@ -1137,7 +1153,7 @@ def main():
                 path = os.path.join(root, file)
                 headers.append(path)
                 
-    project_info = ProjectInfo(headers, dest_dir)
+    project_info = ProjectMeta(headers, dest_dir)
     project_info.flatten()
     
     

@@ -1,4 +1,3 @@
----
 # For embind
 MetaInfo:
   indent_space: 4
@@ -81,19 +80,18 @@ StructFieldMeta:
 StructMeta:
   mangling_prefix: 'S_'
 
+NamespaceMeta:
+  mangling_prefix: 'N_'
 
+ProjectMeta:
+  tagging_template: |
+  #include <emscripten/bind.h>
+  % for include in includes:
+  #include <%(include)s>
+  % endfor
+  using namespace emscripten;
 
+  EMSCRIPTEN_BINDINGS(${ast_name}) {
+    
+  }
 
-
-
-
----
-# For pre.js
-
-
----
-# For .d.ts
-
-
----
-# For WebIDL
