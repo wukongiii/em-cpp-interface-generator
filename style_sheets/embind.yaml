@@ -84,14 +84,28 @@ NamespaceMeta:
   mangling_prefix: 'N_'
 
 ProjectMeta:
-  tagging_template: |
-  #include <emscripten/bind.h>
-  % for include in includes:
-  #include <%(include)s>
-  % endfor
-  using namespace emscripten;
+  tagging_template: |-
+    #include <emscripten/bind.h>
+    % for include in includes:
+    #include <${include}>
+    % endfor
+    using namespace emscripten;
 
-  EMSCRIPTEN_BINDINGS(${ast_name}) {
-    
-  }
+    EMSCRIPTEN_BINDINGS(${module_name}) {
+        // STL containers
+        % for stl_container in stl_containers:
+        ${stl_container.tagging(0)}
+        % endfor
+
+        // Definations
+        % for defination in definations:
+        ${defination.tagging(0)}
+        % endfor
+
+        // Namespaces
+        % for namespace in namespaces:
+        ${namespace.tagging(0)}
+        % endfor
+
+      }
 

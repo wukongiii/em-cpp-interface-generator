@@ -1,9 +1,11 @@
-import sys
 import os
 import shutil
 from clang.cindex import Type, Index, Cursor, CursorKind, TypeKind, AccessSpecifier, StorageClass, TranslationUnit
 from types import SimpleNamespace
 from enum import Enum
+from mako.template import Template
+from mako.exceptions import RichTraceback
+from mako.exceptions import text_error_template
 
 # region ====== Configuration ======
 # see: https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#object-ownership
@@ -90,21 +92,22 @@ class MetaInfo:
         pass
 
     # region ====== Style ======
-    def get_style(self, style_name):
+    def get_style(self, style_name, recursive=True):
         # uses self's class name to find the style
         style = current_style_sheet.get(self.__class__.__name__)
         if style is not None and style_name in style:
             return style.get(style_name)
         
-        # not found, try parent's style
-        for base_class in self.__class__.__bases__:
-            if base_class is object:
-                continue
-                
-            base_class_name = base_class.__name__
-            parent_style = current_style_sheet.get(base_class_name)
-            if parent_style is not None and style_name in parent_style:
-                return parent_style.get(style_name)
+        if recursive:
+            # not found, try parent's style
+            for base_class in self.__class__.__bases__:
+                if base_class is object:
+                    continue
+                    
+                base_class_name = base_class.__name__
+                parent_style = current_style_sheet.get(base_class_name)
+                if parent_style is not None and style_name in parent_style:
+                    return parent_style.get(style_name)
         
         return None
 
@@ -185,11 +188,7 @@ class MetaInfo:
    
 
     # region ====== Tagging ======
-    # UNKONWN("TaggingName", FullName)
-    def get_tagging_template(self):
-        return self.get_style('tagging_template') or\
-            '%(prefix)s%(tagging_type)s("%(tagging_name)s", &%(full_name)s)%(suffix)s'
-
+   
     def get_tagging_prefix(self):
         return self.get_style('tagging_prefix') or ''
     def get_tagging_type(self):
@@ -236,6 +235,11 @@ class MetaInfo:
         
         return '\n'.join(result_lines)
     
+    # UNKONWN("TaggingName", FullName)
+    def get_tagging_template(self):
+        return self.get_style('tagging_template') or\
+            '%(prefix)s%(tagging_type)s("%(tagging_name)s", &%(full_name)s)%(suffix)s'
+
     def tagging(self, indent = 0):
         spaces = ' ' * (indent * self.get_indent_space())
 
@@ -1033,6 +1037,24 @@ class ProjectMeta(NamespaceMeta):
         return ''
       
     def tagging(self, indent):
+        
+        templateContent = self.get_style('tagging_template')
+        template = Template(templateContent)
+        context = {
+            'indent': indent,
+            'module_name': self.ast_name,
+            'includes': self.includes,
+            'stl_containers': self.stl_containers,
+            'definations': self.definations,
+            'namespaces': self.namespaces.values(),
+        }
+        try:
+            content = template.render(**context)
+        except Exception as e:
+            print(text_error_template().render())
+            raise e
+        return content
+
         spaces = ' ' * (indent * self.get_indent_space())
         taggings = []
 
