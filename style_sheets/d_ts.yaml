@@ -1,1 +1,204 @@
+# For TypeScript definition generation (.d.ts) - supplements emcc-generated types
+MetaInfo:
+  indent_space: 4
 
+ProjectMeta:
+  tagging_template: |-
+    // TypeScript definitions for pre.js exported structure
+    // This supplements the emcc-generated .d.ts file
+    // Import the main module types from emcc-generated file
+    import { MainModule } from './JellyPhysic'; // Adjust path as needed
+    
+    // Export the main interface structure that matches pre.js
+    declare const exported: {
+        // STL Containers
+    % for stl_container in stl_containers:
+        ${get_stl_readable_name(stl_container)}: ${get_stl_container_emcc_type(stl_container)};
+    % endfor
+    
+        // Top-level classes and structs
+    % for defination in definations:
+        % if defination.__class__.__name__ in ['ClassMeta', 'StructMeta']:
+        ${defination.get_ast_name()}: ${get_emcc_constructor_type(defination)};
+        % endif
+    % endfor
+    
+        // Top-level constants (references to Module constants)
+    ${generate_all_constants_references(namespaces)}
+    ${generate_all_namespaces_exported_types(namespaces)}
+    };
+    
+    export = exported;
+    export { MainModule };
+    
+    <%!
+    def get_stl_readable_name(stl_container):
+        """Generate readable names for STL containers"""
+        container_type = stl_container.container_type
+        args_combined = stl_container.argument_combined
+        
+        if container_type == 'vector':
+            return args_combined + 'List'
+        elif container_type == 'map':
+            return args_combined + 'Map'
+        elif container_type == 'set':
+            return args_combined + 'Set'
+        elif container_type == 'unordered_map':
+            return args_combined + 'UnorderedMap'
+        elif container_type == 'unordered_set':
+            return args_combined + 'UnorderedSet'
+        else:
+            return container_type + args_combined
+    
+    def get_stl_container_emcc_type(stl_container):
+        """Generate TypeScript type reference for STL containers from emcc types"""
+        mangled_name = stl_container.get_mangled_name()
+        return f"typeof MainModule.prototype.{mangled_name}"
+    
+    def get_emcc_constructor_type(class_meta):
+        """Generate TypeScript constructor type reference from emcc types"""
+        mangled_name = class_meta.get_mangled_name()
+        return f"typeof MainModule.prototype.{mangled_name}"
+    
+    def parse_mangled_name(mangled_name):
+        """Parse mangled name to extract hierarchy information"""
+        parts = mangled_name.split('__')
+        hierarchy = []
+        
+        for part in parts:
+            if part.startswith('N_'):
+                hierarchy.append(('namespace', part[2:]))
+            elif part.startswith('C_'):
+                hierarchy.append(('class', part[2:]))
+            elif part.startswith('S_'):
+                hierarchy.append(('struct', part[2:]))
+            elif part.startswith('E_'):
+                hierarchy.append(('enum', part[2:]))
+            elif part.startswith('STL__'):
+                hierarchy.append(('stl', part))
+            else:
+                hierarchy.append(('plain', part))
+        
+        return hierarchy
+    
+    def collect_all_constants(namespaces):
+        """Collect all constants from all namespaces"""
+        constants = []
+        
+        def collect_from_namespace(namespace):
+            for defination in namespace.definations:
+                if defination.__class__.__name__ == 'ConstantValueMeta':
+                    constants.append(defination)
+            
+            for nested_ns in namespace.namespaces.values():
+                collect_from_namespace(nested_ns)
+        
+        for namespace in namespaces:
+            collect_from_namespace(namespace)
+        
+        return constants
+    
+    def generate_all_constants_references(namespaces):
+        """Generate references to constants in MainModule"""
+        constants = collect_all_constants(namespaces)
+        result = ''
+        
+        for constant in constants:
+            # Reference the constant from MainModule
+            result += f"        {constant.get_ast_name()}: typeof MainModule.prototype.{constant.get_ast_name()};\n"
+        
+        return result
+    
+    def build_hierarchical_structure_for_exported(namespace):
+        """Build hierarchical structure for exported object types"""
+        structure = {}
+        
+        for defination in namespace.definations:
+            if defination.__class__.__name__ == 'ConstantValueMeta':
+                continue
+                
+            mangled_name = defination.get_mangled_name()
+            hierarchy = parse_mangled_name(mangled_name)
+            
+            if len(hierarchy) > 1 and hierarchy[0][1] != namespace.get_ast_name():
+                continue
+            
+            if len(hierarchy) <= 1:
+                structure[defination.get_ast_name()] = {
+                    'mangled_name': defination.get_mangled_name(),
+                    'type': defination.__class__.__name__,
+                    'meta': defination,
+                    'children': {}
+                }
+                continue
+            
+            current = structure
+            for i, (prefix_type, name) in enumerate(hierarchy[1:-1]):
+                if name not in current:
+                    current[name] = {
+                        'children': {},
+                        'type': prefix_type,
+                        'mangled_name': None,
+                        'meta': None
+                    }
+                current = current[name]['children']
+            
+            final_name = defination.get_ast_name()
+            current[final_name] = {
+                'mangled_name': defination.get_mangled_name(),
+                'type': defination.__class__.__name__,
+                'meta': defination,
+                'children': {}
+            }
+        
+        return structure
+    
+    def generate_all_namespaces_exported_types(namespaces):
+        """Generate TypeScript types for exported object structure"""
+        if not namespaces:
+            return ''
+            
+        result = '\n'
+        
+        for namespace in namespaces:
+            result += f"        // {namespace.get_ast_name()} namespace\n"
+            result += f"        {namespace.get_ast_name()}: {{\n"
+            result += generate_namespace_exported_types(namespace)
+            result += "        };\n"
+        
+        return result
+    
+    def generate_namespace_exported_types(namespace):
+        """Generate TypeScript types for exported namespace object"""
+        result = ''
+        
+        structure = build_hierarchical_structure_for_exported(namespace)
+        result += generate_structure_exported_types(structure, 3)
+        
+        for nested_ns in namespace.namespaces.values():
+            result += f"            {nested_ns.get_ast_name()}: {{\n"
+            result += generate_namespace_exported_types(nested_ns)
+            result += "            };\n"
+        
+        return result
+    
+    def generate_structure_exported_types(structure, indent_level):
+        """Generate TypeScript types for exported object structure using emcc types"""
+        indent = '    ' * indent_level
+        result = ''
+        
+        for name, data in structure.items():
+            if data['children']:
+                result += f"{indent}{name}: {{\n"
+                result += generate_structure_exported_types(data['children'], indent_level + 1)
+                result += f"{indent}}};\n"
+            else:
+                if data['type'] in ['ClassMeta', 'StructMeta']:
+                    # Reference the constructor type from MainModule
+                    result += f"{indent}{name}: typeof MainModule.prototype.{data['mangled_name']};\n"
+                elif data['type'] == 'EnumMeta':
+                    # Reference the enum type from MainModule  
+                    result += f"{indent}{name}: typeof MainModule.prototype.{data['mangled_name']};\n"
+        
+        return result
+    %>
