@@ -998,15 +998,18 @@ def NamespaceMetaInfoIterator(namespace:NamespaceMeta):
 
 
 class ProjectMeta(NamespaceMeta):
-    def __init__(self, headers:list, dest_dir, parse_args=['-x', 'c++', '-std=c++17']):
+    def __init__(self, headers:list, dest_dir, module_name='MainModule', project_name=None, parse_args=['-x', 'c++', '-std=c++17']):
         self.headers = headers
         self.dest_dir = dest_dir
+        self.module_name = module_name
+        # If project_name is not provided, derive it from module_name
+        self.project_name = project_name if project_name is not None else module_name
         self.parse_args = parse_args
 
         self.includes = []
         self.stl_containers:list[STLContainerMeta] = []
 
-        fake_cursor = SimpleNamespace(spelling='MainModule', type=SimpleNamespace(spelling='root'), kind='root', displayname='root',)
+        fake_cursor = SimpleNamespace(spelling=module_name, type=SimpleNamespace(spelling='root'), kind='root', displayname=self.project_name,)
         fake_cursor.canonical = fake_cursor
         
         super().__init__(fake_cursor, None, dest_dir)
@@ -1042,7 +1045,8 @@ class ProjectMeta(NamespaceMeta):
         template = Template(templateContent)
         context = {
             'indent': indent,
-            'module_name': self.ast_name,
+            'module_name': self.module_name,
+            'project_name': self.project_name,
             'includes': self.includes,
             'stl_containers': self.stl_containers,
             'definations': self.definations,
@@ -1160,6 +1164,8 @@ def main():
     parser.add_argument('dest_dir', type=str, help='Destination directory')
     parser.add_argument('--style', type=str, default='embind', help='Style sheet to use (embind, pre_js, d_ts, webidl)')
     parser.add_argument('--output', type=str, help='Output filename (default based on style)')
+    parser.add_argument('--module-name', type=str, default='MainModule', help='Module name for the generated bindings (default: MainModule)')
+    parser.add_argument('--project-name', type=str, help='Project name for imports and references (default: same as module-name)')
     args = parser.parse_args()
 
     src_dir, dest_dir = args.src_dir, args.dest_dir
@@ -1177,7 +1183,7 @@ def main():
                 path = os.path.join(root, file)
                 headers.append(path)
                 
-    project_info = ProjectMeta(headers, dest_dir)
+    project_info = ProjectMeta(headers, dest_dir, args.module_name, args.project_name)
     project_info.flatten()
     
     # Select style sheet

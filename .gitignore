@@ -1,3 +1,4 @@
 .vscode
 generated_embinds
 /test
+__pycache__
