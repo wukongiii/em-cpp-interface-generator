@@ -45,7 +45,7 @@ def load_style_sheets():
     }
     
     for name in style_sheets.keys():
-        with open(f'style_sheets/{name}.yaml', 'r') as file:
+        with open(f'style_sheets/{name}.yaml', 'r', encoding='utf-8') as file:
             style = yaml.safe_load(file)
             style_sheets[name] = style
 
@@ -1158,6 +1158,8 @@ def main():
     parser = argparse.ArgumentParser(description='Embind generator')
     parser.add_argument('src_dir', type=str, help='Source directory')
     parser.add_argument('dest_dir', type=str, help='Destination directory')
+    parser.add_argument('--style', type=str, default='embind', help='Style sheet to use (embind, pre_js, d_ts, webidl)')
+    parser.add_argument('--output', type=str, help='Output filename (default based on style)')
     args = parser.parse_args()
 
     src_dir, dest_dir = args.src_dir, args.dest_dir
@@ -1178,12 +1180,29 @@ def main():
     project_info = ProjectMeta(headers, dest_dir)
     project_info.flatten()
     
-    
+    # Select style sheet
+    select_style_sheet(args.style)
 
+    # Generate content
     binding_content = project_info.tagging(0)
-    with open(os.path.join(dest_dir, 'embind_bindings.cpp'), 'w') as f:
+    
+    # Determine output filename
+    if args.output:
+        output_filename = args.output
+    else:
+        style_extensions = {
+            'embind': 'embind_bindings.cpp',
+            'pre_js': 'pre.js',
+            'd_ts': 'bindings.d.ts',
+            'webidl': 'bindings.webidl'
+        }
+        output_filename = style_extensions.get(args.style, f'output_{args.style}.txt')
+    
+    output_path = os.path.join(dest_dir, output_filename)
+    with open(output_path, 'w') as f:
         f.write(binding_content)
     
+    print(f"Generated {args.style} output: {output_path}")
     
     # generate_emcc_command(dest_dir, os.path.join(dest_dir, 'output.js'))
     # print(f"emcc --bind -O3 -std=c++17 -I{dest_dir} {dest_dir}/*.cpp {dest_dir}/embind_bindings.cpp -s WASM=1 -o {dest_dir}/output.js --embind-emit-tsd")

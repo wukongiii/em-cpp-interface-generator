@@ -1,1 +1,242 @@
+# For pre.js generation - converts mangled names back to hierarchical readable JS objects
+MetaInfo:
+  indent_space: 4
 
+ProjectMeta:
+  tagging_template: |-
+    // pre.js - Generated automatically by embind_generator
+    
+    // preRun: Initialize before WebAssembly module
+    Module['preRun'] = [
+        function() {
+            console.log("Running preRun: Initialization before WebAssembly.");
+        }
+    ];
+    
+    // postRun: Execute after WebAssembly execution
+    Module['postRun'] = [
+        function() {
+            console.log("Running postRun after WebAssembly execution.");
+            console.log(Module);
+    
+            Module['exported'] = {
+                // STL Containers
+    % for stl_container in stl_containers:
+                ${get_stl_readable_name(stl_container)}: Module['${stl_container.get_mangled_name()}'],
+    % endfor
+    
+                // Top-level classes and structs
+    % for defination in definations:
+        % if defination.__class__.__name__ in ['ClassMeta', 'StructMeta']:
+                ${defination.get_ast_name()}: Module['${defination.get_mangled_name()}'],
+        % endif
+    % endfor
+    
+                // Top-level constants (all constants are bound as top-level in embind)
+    ${generate_all_constants_content(namespaces)}
+    ${generate_all_namespaces_content(namespaces)}
+            };
+        }
+    ];
+    
+    <%!
+    def get_stl_readable_name(stl_container):
+        """Generate readable names for STL containers"""
+        container_type = stl_container.container_type
+        args_combined = stl_container.argument_combined
+        
+        # Generate readable name based on container type
+        if container_type == 'vector':
+            return args_combined + 'List'
+        elif container_type == 'map':
+            return args_combined + 'Map'
+        elif container_type == 'set':
+            return args_combined + 'Set'
+        elif container_type == 'unordered_map':
+            return args_combined + 'UnorderedMap'
+        elif container_type == 'unordered_set':
+            return args_combined + 'UnorderedSet'
+        else:
+            return container_type + args_combined
+    
+    def parse_mangled_name(mangled_name):
+        """Parse mangled name to extract hierarchy information
+        
+        Format: parent_mangled_name + '__' + type_prefix + self_name
+        Type prefixes: N_ (namespace), C_ (class), S_ (struct), E_ (enum)
+        """
+        parts = mangled_name.split('__')
+        hierarchy = []
+        
+        for part in parts:
+            if part.startswith('N_'):
+                hierarchy.append(('namespace', part[2:]))
+            elif part.startswith('C_'):
+                hierarchy.append(('class', part[2:]))
+            elif part.startswith('S_'):
+                hierarchy.append(('struct', part[2:]))
+            elif part.startswith('E_'):
+                hierarchy.append(('enum', part[2:]))
+            elif part.startswith('STL__'):
+                hierarchy.append(('stl', part))
+            else:
+                # Plain name without prefix (likely root level)
+                hierarchy.append(('plain', part))
+        
+        return hierarchy
+    
+    def collect_all_constants(namespaces):
+        """Collect all constants from all namespaces"""
+        constants = []
+        
+        def collect_from_namespace(namespace):
+            for defination in namespace.definations:
+                if defination.__class__.__name__ == 'ConstantValueMeta':
+                    constants.append(defination)
+            
+            # Recursively collect from nested namespaces
+            for nested_ns in namespace.namespaces.values():
+                collect_from_namespace(nested_ns)
+        
+        for namespace in namespaces:
+            collect_from_namespace(namespace)
+        
+        return constants
+    
+    def generate_all_constants_content(namespaces):
+        """Generate all constants as top-level items"""
+        constants = collect_all_constants(namespaces)
+        result = ''
+        
+        for constant in constants:
+            result += f"                {constant.get_ast_name()}: Module['{constant.get_ast_name()}'],\n"
+        
+        return result
+    
+    def build_hierarchical_structure(namespace):
+        """Build hierarchical structure based on mangled names (excluding constants)"""
+        structure = {}
+        
+        # Group all definitions by their parent hierarchy
+        for defination in namespace.definations:
+            # Skip constants as they are handled at top level
+            if defination.__class__.__name__ == 'ConstantValueMeta':
+                continue
+                
+            mangled_name = defination.get_mangled_name()
+            hierarchy = parse_mangled_name(mangled_name)
+            
+            # For items with hierarchy, check if they belong to current namespace
+            if len(hierarchy) > 1 and hierarchy[0][1] != namespace.get_ast_name():
+                continue
+            
+            # Skip if no hierarchy (top-level items)
+            if len(hierarchy) <= 1:
+                structure[defination.get_ast_name()] = {
+                    'mangled_name': defination.get_mangled_name(),
+                    'type': defination.__class__.__name__,
+                    'children': {}
+                }
+                continue
+            
+            # Build nested structure, starting from the second level (skip namespace level)
+            current = structure
+            for i, (prefix_type, name) in enumerate(hierarchy[1:-1]):  # Skip namespace and self
+                if name not in current:
+                    current[name] = {
+                        'children': {},
+                        'type': prefix_type,
+                        'mangled_name': None
+                    }
+                current = current[name]['children']
+            
+            # Add the final item
+            final_name = defination.get_ast_name()
+            current[final_name] = {
+                'mangled_name': defination.get_mangled_name(),
+                'type': defination.__class__.__name__,
+                'children': {}
+            }
+        
+        return structure
+    
+    def generate_all_namespaces_content(namespaces):
+        """Generate all namespaces content"""
+        if not namespaces:
+            return ''
+            
+        result = '\n'
+        
+        for i, namespace in enumerate(namespaces):
+            result += f"                // {namespace.get_ast_name()} namespace\n"
+            result += f"                {namespace.get_ast_name()}: {{\n"
+            result += generate_namespace_content(namespace)
+            result += "                }"
+            if i < len(namespaces) - 1:
+                result += ","
+            result += "\n"
+        
+        return result
+    
+    def generate_namespace_content(namespace):
+        """Generate namespace content with proper hierarchical structure (excluding constants)"""
+        result = ''
+        
+        # Build hierarchical structure from mangled names (excluding constants)
+        structure = build_hierarchical_structure(namespace)
+        
+        # Generate hierarchical content
+        result += generate_structure_content(structure, 5)  # 5 levels of indentation for namespace content
+        
+        # Process nested namespaces recursively
+        for nested_ns in namespace.namespaces.values():
+            result += f"                    {nested_ns.get_ast_name()}: {{\n"
+            result += generate_namespace_content_nested(nested_ns, 6)
+            result += "                    },\n"
+        
+        return result
+    
+    def generate_namespace_content_nested(namespace, indent_level):
+        """Generate nested namespace content"""
+        indent = '    ' * indent_level
+        result = ''
+        
+        # Build hierarchical structure from mangled names (excluding constants)
+        structure = build_hierarchical_structure(namespace)
+        
+        # Generate hierarchical content
+        result += generate_structure_content(structure, indent_level)
+        
+        # Process nested namespaces recursively
+        for nested_ns in namespace.namespaces.values():
+            result += f"{indent}{nested_ns.get_ast_name()}: {{\n"
+            result += generate_namespace_content_nested(nested_ns, indent_level + 1)
+            result += f"{indent}}},\n"
+        
+        return result
+    
+    def generate_structure_content(structure, indent_level):
+        """Generate content for hierarchical structure"""
+        indent = '    ' * indent_level
+        result = ''
+        
+        for name, data in structure.items():
+            if data['children']:
+                # Has children, create nested structure
+                result += f"{indent}{name}: {{\n"
+                
+                # Add self reference if has mangled name
+                if data['mangled_name']:
+                    result += f"{indent}    ...Module['{data['mangled_name']}'],\n"
+                
+                # Add children
+                result += generate_structure_content(data['children'], indent_level + 1)
+                
+                result += f"{indent}}},\n"
+            else:
+                # Leaf node, simple mapping
+                if data['mangled_name']:
+                    result += f"{indent}{name}: Module['{data['mangled_name']}'],\n"
+        
+        return result
+    %> 
