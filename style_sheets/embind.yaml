@@ -87,7 +87,7 @@ ProjectMeta:
   tagging_template: |-
     #include <emscripten/bind.h>
     % for include in includes:
-    #include <${include}>
+    #include "${include}"
     % endfor
     using namespace emscripten;
 

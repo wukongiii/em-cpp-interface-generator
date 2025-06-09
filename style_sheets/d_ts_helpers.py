@@ -8,12 +8,12 @@ import shared_helpers as shared
 def get_stl_container_emcc_type(stl_container, module_name='MainModule'):
     """Generate TypeScript type reference for STL containers from emcc types"""
     mangled_name = stl_container.get_mangled_name()
-    return f"typeof {module_name}.prototype.{mangled_name}"
+    return f"{module_name}['{mangled_name}']"
 
 def get_emcc_constructor_type(class_meta, module_name='MainModule'):
     """Generate TypeScript constructor type reference from emcc types"""
     mangled_name = class_meta.get_mangled_name()
-    return f"typeof {module_name}.prototype.{mangled_name}"
+    return f"{module_name}['{mangled_name}']"
 
 def generate_all_constants_references(namespaces, module_name='MainModule'):
     """Generate references to constants in MainModule"""
@@ -22,7 +22,7 @@ def generate_all_constants_references(namespaces, module_name='MainModule'):
     
     for constant in constants:
         # Reference the constant from MainModule
-        result += f"        {constant.get_ast_name()}: typeof {module_name}.prototype.{constant.get_ast_name()};\n"
+        result += f"        {constant.get_ast_name()}: {module_name}['{constant.get_ast_name()}'];\n"
     
     return result
 
@@ -55,15 +55,24 @@ def generate_structure_exported_types(structure, indent_level, module_name='Main
     
     for name, data in structure.items():
         if data['children']:
-            result += f"{indent}{name}: {{\n"
-            result += generate_structure_exported_types(data['children'], indent_level + 1, module_name)
-            result += f"{indent}}};\n"
+            # When there are children, create an intersection type that includes both
+            # the base class/struct/enum and the nested properties
+            if data.get('mangled_name'):
+                # Has a base type with nested properties - use intersection type
+                result += f"{indent}{name}: {module_name}['{data['mangled_name']}'] & {{\n"
+                result += generate_structure_exported_types(data['children'], indent_level + 1, module_name)
+                result += f"{indent}}};\n"
+            else:
+                # Pure namespace with no base type
+                result += f"{indent}{name}: {{\n"
+                result += generate_structure_exported_types(data['children'], indent_level + 1, module_name)
+                result += f"{indent}}};\n"
         else:
             if data['type'] in ['ClassMeta', 'StructMeta']:
                 # Reference the constructor type from MainModule
-                result += f"{indent}{name}: typeof {module_name}.prototype.{data['mangled_name']};\n"
+                result += f"{indent}{name}: {module_name}['{data['mangled_name']}'];\n"
             elif data['type'] == 'EnumMeta':
                 # Reference the enum type from MainModule  
-                result += f"{indent}{name}: typeof {module_name}.prototype.{data['mangled_name']};\n"
+                result += f"{indent}{name}: {module_name}['{data['mangled_name']}'];\n"
     
     return result 

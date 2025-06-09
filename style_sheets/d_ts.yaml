@@ -28,7 +28,7 @@ ProjectMeta:
     ${d_ts.generate_all_namespaces_exported_types(namespaces, module_name)}
     };
     
-    export = exported;
+    export default exported;
     export { ${module_name} };
     
     <%!
