@@ -19,7 +19,7 @@ ProjectMeta:
             console.log("Running postRun after WebAssembly execution.");
             console.log(Module);
     
-            Module['exported'] = {
+            Module['Restructured'] = {
                 // STL Containers
     % for stl_container in stl_containers:
                 ${shared.get_stl_readable_name(stl_container)}: Module['${stl_container.get_mangled_name()}'],

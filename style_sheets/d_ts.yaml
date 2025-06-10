@@ -7,10 +7,10 @@ ProjectMeta:
     // TypeScript definitions for pre.js exported structure
     // This supplements the emcc-generated .d.ts file
     // Import the main module types from emcc-generated file
-    import { ${module_name} } from './${project_name}'; // Adjust path as needed
+    import MainModuleFactory, { ${module_name} } from './${project_name}'; // Adjust path as needed
     
     // Export the main interface structure that matches pre.js
-    declare const exported: {
+    export interface Restructured {
         // STL Containers
     % for stl_container in stl_containers:
         ${shared.get_stl_readable_name(stl_container)}: ${d_ts.get_stl_container_emcc_type(stl_container, module_name)};
@@ -26,10 +26,9 @@ ProjectMeta:
         // Top-level constants (references to Module constants)
     ${d_ts.generate_all_constants_references(namespaces, module_name)}
     ${d_ts.generate_all_namespaces_exported_types(namespaces, module_name)}
-    };
+    }
     
-    export default exported;
-    export { ${module_name} };
+    export { ${module_name}, MainModuleFactory };
     
     <%!
     import sys
