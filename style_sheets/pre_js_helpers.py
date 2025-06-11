@@ -48,17 +48,17 @@ def generate_structure_content(structure, indent_level):
     
     for name, data in structure.items():
         if data['children']:
-            # Has children, create nested structure
-            result += f"{indent}{name}: {{\n"
-            
-            # Add self reference if has mangled name
+            # Has children, create nested structure using Object.assign
             if data['mangled_name']:
-                result += f"{indent}    ...Module['{data['mangled_name']}'],\n"
-            
-            # Add children
-            result += generate_structure_content(data['children'], indent_level + 1)
-            
-            result += f"{indent}}},\n"
+                # Use Object.assign to merge base class with nested properties
+                result += f"{indent}{name}: Object.assign(Module['{data['mangled_name']}'], {{\n"
+                result += generate_structure_content(data['children'], indent_level + 1)
+                result += f"{indent}}}),\n"
+            else:
+                # Pure namespace with no base type
+                result += f"{indent}{name}: {{\n"
+                result += generate_structure_content(data['children'], indent_level + 1)
+                result += f"{indent}}},\n"
         else:
             # Leaf node, simple mapping
             if data['mangled_name']:
