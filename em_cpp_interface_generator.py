@@ -404,9 +404,11 @@ class FunctionMeta(MetaInfo):
         self.return_type = ''
         self.args = []
         self.args_count = 0
+        self.same_args_count_index = 0
 
         self.is_static = False
         self.is_overloaded = False
+        self.rename_overloaded = False
 
         self.returns_raw_pointer = False
         self.takes_raw_pointer = False
@@ -488,10 +490,26 @@ class FunctionMeta(MetaInfo):
     def get_tagging_suffix(self):
         return self.get_style('tagging_suffix') or ';'
     
+    
     def get_tagging_name(self):
+        tagging_name = ''
         if self.ast_name.startswith('operator'):
-            return self.get_mapped_operator_name(self.ast_name)
-        return self.ast_name
+            tagging_name = self.get_mapped_operator_name(self.ast_name)
+        else:
+            tagging_name = self.ast_name
+            
+        if self.is_overloaded and self.rename_overloaded:
+            tagging_name = self.get_overloaded_method_name(tagging_name)
+        
+        return tagging_name
+
+    def get_overloaded_method_name(self, tagging_name):
+        # methodName_argsCount
+        method_name = f'{tagging_name}_{str(self.args_count)}'
+        if self.same_args_count_index > 0:
+            # methodName_argsCount_index
+            method_name += f'_{self.same_args_count_index}'
+        return method_name
 
     def get_mapped_operator_name(self, operator_name):
         operator_name_map = {
@@ -538,24 +556,31 @@ class FunctionMeta(MetaInfo):
 class FunctionHomonymic():
     def __init__(self):
         self.homonymic_functions:list[FunctionMeta] = []
+        self.arguments_map:dict[int, int] = {}
 
-    def add_function(self, method: FunctionMeta, check_args_count = False):
-        
+    def add_function(self, method: FunctionMeta):
         if len(self.homonymic_functions) > 0:
             method.is_overloaded = True
         if len(self.homonymic_functions) == 1:
             self.homonymic_functions[0].is_overloaded = True
 
-        if check_args_count:
-            for func in self.homonymic_functions:
-                if func.args_count == method.args_count:
-                    # emcc will pass if you keep it in the bindings, but later will throw an error in the runtime, like:
-                    ## Uncaught BindingError: Cannot register multiple constructors with identical number of parameters  for class! 
-                    ## Overload resolution is currently only performed using the parameter count, not actual type info!
-                    method.should_be_ignored = True
-                    method.ignored_reason = f'overloaded function with same amount of paramters(embind does not support): {method.get_full_name()}'
+        same_args_amount_functions = self.arguments_map.get(method.args_count, 0) + 1
+        self.arguments_map[method.args_count] = same_args_amount_functions
+        # tells  the method how many functions with the same arguments count are there
+        method.same_args_count_index = same_args_amount_functions
 
         self.homonymic_functions.append(method)
+
+        if method.is_overloaded and not method.rename_overloaded and same_args_amount_functions > 1:
+            # emcc can not handle overloaded functions with same amount of paramters effectively, thus not support it. Fuck them.
+            # If you forcely add them to the binding cpp file, later you will get errors in JS when you call the overloaded functions.
+            # see: https://github.com/emscripten-core/emscripten/issues/20117
+            # if later emscripten support it, then remove this process
+            method.should_be_ignored = True
+            method.ignored_reason = f'overloaded function with same amount of paramters(embind does not support): {method.get_full_name()}'
+
+        
+        
         
 
     def tagging(self, indent):
@@ -569,10 +594,11 @@ class Functions():
     def __init__(self):
         self.functionIndexedByName:dict[str, FunctionHomonymic] = {}
 
-    def add_function(self, function: FunctionMeta, check_args_count = False):
+    def add_function(self, function: FunctionMeta, rename_overloaded = True):
         if function.ast_name not in self.functionIndexedByName:
             self.functionIndexedByName[function.ast_name] = FunctionHomonymic()
-        self.functionIndexedByName[function.ast_name].add_function(function, check_args_count)
+        function.rename_overloaded = rename_overloaded
+        self.functionIndexedByName[function.ast_name].add_function(function)
     
     def count(self):
         return len(self.functionIndexedByName)
@@ -683,8 +709,9 @@ class Constructors(Functions):
     def __init__(self):
         super().__init__()
 
-    def add_function(self, function: FunctionMeta, check_args_count = True):
-        super().add_function(function, check_args_count)
+    #  Don't rename constructors
+    def add_function(self, function: FunctionMeta, rename_overloaded = False):
+        super().add_function(function, rename_overloaded)
         
     def get_tagging(tagging, indent):
         return super().tagging(indent)
