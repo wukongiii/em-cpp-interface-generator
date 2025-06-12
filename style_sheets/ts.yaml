@@ -8,24 +8,43 @@ ProjectMeta:
     // This supplements the emcc-generated .ts file
     // Import the main module types from emcc-generated file
     import _MainModuleFactory, { MainModule as ${module_name} } from './${project_name}.js'; // Adjust path as needed
-    
-    // Export the main interface structure that matches pre.js
-    export interface Restructured {
+
+    export namespace ${export} { 
         // STL Containers
     % for stl_container in stl_containers:
-        ${shared.get_stl_readable_name(stl_container)}: ${ts.get_stl_container_emcc_type(stl_container, module_name)};
+        export type ${shared.get_stl_readable_name(stl_container)} = ${ts.get_stl_container_emcc_type(stl_container, module_name)};
     % endfor
     
         // Top-level classes and structs
     % for defination in definations:
         % if defination.__class__.__name__ in ['ClassMeta', 'StructMeta']:
-        ${defination.get_ast_name()}: ${ts.get_emcc_constructor_type(defination, module_name)};
+        export type ${defination.get_ast_name()} = ${ts.get_emcc_constructor_type(defination, module_name)};
+        % endif
+    % endfor
+    
+        // Namespaces with their types (excluding constants)
+    ${ts.generate_all_namespaces_exported_types(namespaces, module_name, True)}
+    }   
+
+
+    
+    // Export the main interface structure that matches pre.js
+    export interface ${export} {
+        // STL Containers
+    % for stl_container in stl_containers:
+        ${shared.get_stl_readable_name(stl_container)}: ${export}.${shared.get_stl_readable_name(stl_container)};
+    % endfor
+    
+    // Top-level classes and structs
+    % for defination in definations:
+        % if defination.__class__.__name__ in ['ClassMeta', 'StructMeta']:
+        ${defination.get_ast_name()}: ${export}.${defination.get_ast_name()};
         % endif
     % endfor
     
         // Top-level constants (references to Module constants)
     ${ts.generate_all_constants_references(namespaces, module_name)}
-    ${ts.generate_all_namespaces_exported_types(namespaces, module_name)}
+    ${ts.generate_all_namespaces_exported_types(namespaces, module_name, False, export)}
     }
 
     export interface MainModule {
@@ -49,4 +68,6 @@ ProjectMeta:
     
     import shared_helpers as shared
     import ts_helpers as ts
+
+    export = 'Restructured'
     %>

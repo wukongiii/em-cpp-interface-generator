@@ -148,18 +148,24 @@ class MetaInfo:
     def get_full_name_seperator(self):
         return self.get_style('full_name_seperator') or '::'
 
-    def get_full_name(self):
+    def get_full_name(self, seperator=None):
         if self.is_top_level():
             return self.get_ast_name()
+        
+        if seperator is None:
+            seperator = self.get_full_name_seperator()
 
         full_name_template = self.get_full_name_template()
         full_name_info = {
             'parent_name': self.parent.get_full_name(),
-            'seperator': self.get_full_name_seperator(),
+            'seperator': seperator,
             'ast_name': self.get_ast_name(),
             'tagging_name': self.get_tagging_name(),
         }
         return full_name_template % full_name_info
+
+    def get_doted_full_name(self):
+        return self.get_full_name(seperator='.')
     
     def get_mangling_template(self):
         return self.get_style('mangling_template') or\
