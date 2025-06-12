@@ -40,7 +40,7 @@ def load_style_sheets():
     style_sheets = {
         'embind': None, # for embind
         'pre_js': None, # for pre.js to unmangle the name and restore the structure
-        'd_ts': None, # for d.ts to export the types
+        'ts': None, # for bindings.ts to export the types
         'webidl': None, # for WebIDL
     }
     
@@ -1189,7 +1189,7 @@ def main():
     parser = argparse.ArgumentParser(description='Embind generator')
     parser.add_argument('src_dir', type=str, help='Source directory')
     parser.add_argument('dest_dir', type=str, help='Destination directory')
-    parser.add_argument('--style', type=str, default='embind', help='Style sheet to use (embind, pre_js, d_ts, webidl)')
+    parser.add_argument('--style', type=str, default='embind', help='Style sheet to use (embind, pre_js, ts, webidl)')
     parser.add_argument('--output', type=str, help='Output filename (default based on style)')
     parser.add_argument('--module-name', type=str, default='MainModule', help='Module name for the generated bindings (default: MainModule)')
     parser.add_argument('--project-name', type=str, help='Project name for imports and references (default: same as module-name)')
@@ -1226,7 +1226,7 @@ def main():
         style_extensions = {
             'embind': 'embind_bindings.cpp',
             'pre_js': 'pre.js',
-            'd_ts': 'bindings.d.ts',
+            'ts': 'bindings.ts',
             'webidl': 'bindings.webidl'
         }
         output_filename = style_extensions.get(args.style, f'output_{args.style}.txt')

@@ -1,11 +1,11 @@
-# For TypeScript definition generation (.d.ts) - supplements emcc-generated types
+# For TypeScript definition generation (.ts) - supplements emcc-generated types
 MetaInfo:
   indent_space: 4
 
 ProjectMeta:
   tagging_template: |-
     // TypeScript definitions for pre.js exported structure
-    // This supplements the emcc-generated .d.ts file
+    // This supplements the emcc-generated .ts file
     // Import the main module types from emcc-generated file
     import MainModuleFactory, { ${module_name} } from './${project_name}'; // Adjust path as needed
     
@@ -13,19 +13,19 @@ ProjectMeta:
     export interface Restructured {
         // STL Containers
     % for stl_container in stl_containers:
-        ${shared.get_stl_readable_name(stl_container)}: ${d_ts.get_stl_container_emcc_type(stl_container, module_name)};
+        ${shared.get_stl_readable_name(stl_container)}: ${ts.get_stl_container_emcc_type(stl_container, module_name)};
     % endfor
     
         // Top-level classes and structs
     % for defination in definations:
         % if defination.__class__.__name__ in ['ClassMeta', 'StructMeta']:
-        ${defination.get_ast_name()}: ${d_ts.get_emcc_constructor_type(defination, module_name)};
+        ${defination.get_ast_name()}: ${ts.get_emcc_constructor_type(defination, module_name)};
         % endif
     % endfor
     
         // Top-level constants (references to Module constants)
-    ${d_ts.generate_all_constants_references(namespaces, module_name)}
-    ${d_ts.generate_all_namespaces_exported_types(namespaces, module_name)}
+    ${ts.generate_all_constants_references(namespaces, module_name)}
+    ${ts.generate_all_namespaces_exported_types(namespaces, module_name)}
     }
     
     export { ${module_name}, MainModuleFactory };
@@ -41,5 +41,5 @@ ProjectMeta:
         sys.path.insert(0, style_sheets_dir)
     
     import shared_helpers as shared
-    import d_ts_helpers as d_ts
+    import ts_helpers as ts
     %>
