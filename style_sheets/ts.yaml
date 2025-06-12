@@ -7,7 +7,7 @@ ProjectMeta:
     // TypeScript definitions for pre.js exported structure
     // This supplements the emcc-generated .ts file
     // Import the main module types from emcc-generated file
-    import MainModuleFactory, { ${module_name} } from './${project_name}'; // Adjust path as needed
+    import _MainModuleFactory, { MainModule as ${module_name} } from './${project_name}.js'; // Adjust path as needed
     
     // Export the main interface structure that matches pre.js
     export interface Restructured {
@@ -27,8 +27,15 @@ ProjectMeta:
     ${ts.generate_all_constants_references(namespaces, module_name)}
     ${ts.generate_all_namespaces_exported_types(namespaces, module_name)}
     }
+
+    export interface MainModule {
+        Restructured: Restructured;
+    }
     
-    export { ${module_name}, MainModuleFactory };
+    export default function MainModuleFactory (options?: unknown): Promise<MainModule>{
+        return _MainModuleFactory(options) as unknown as Promise<MainModule>;
+    }
+
     
     <%!
     import sys
