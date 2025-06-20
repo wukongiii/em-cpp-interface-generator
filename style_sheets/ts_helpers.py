@@ -8,12 +8,12 @@ import shared_helpers as shared
 def get_stl_container_emcc_type(stl_container, module_name='MainModule'):
     """Generate TypeScript type reference for STL containers from emcc types"""
     mangled_name = stl_container.get_mangled_name()
-    return f"{module_name}['{mangled_name}']"
+    return f"PossibleInstanceType<{module_name}['{mangled_name}']>"
 
 def get_emcc_constructor_type(class_meta, module_name='MainModule'):
     """Generate TypeScript constructor type reference from emcc types"""
     mangled_name = class_meta.get_mangled_name()
-    return f"{module_name}['{mangled_name}']"
+    return f"PossibleInstanceType<{module_name}['{mangled_name}']>"
 
 def generate_all_constants_references(namespaces, module_name='MainModule'):
     """Generate references to constants in MainModule"""
@@ -112,14 +112,13 @@ def generate_structure_exported_types(structure, indent_level, module_name='Main
             if data.get('mangled_name'):
                 if is_export_namespace:
                     # For export namespace with children, create both type and namespace
-                    result += f"{indent}{prefix}{name} = {module_name}['{data['mangled_name']}'];\n"
+                    result += f"{indent}{prefix}{name} = PossibleInstanceType<{module_name}['{data['mangled_name']}']>;\n"
                     result += f"{indent}export namespace {name} {{\n"
                     result += generate_structure_exported_types(data['children'], indent_level + 1, module_name, is_export_namespace, export_namespace_name, f"{namespace_path}.{name}" if namespace_path else name)
                     result += f"{indent}}}\n"
                 else:
-                    # For interface, use intersection type with namespace reference
-                    full_path = f"{export_namespace_name}.{namespace_path}.{name}" if namespace_path else f"{export_namespace_name}.{name}"
-                    result += f"{indent}{name}: {full_path} & {{\n"
+                    # For interface, use intersection type with direct module reference
+                    result += f"{indent}{name}: {module_name}['{data['mangled_name']}'] & {{\n"
                     result += generate_structure_exported_types(data['children'], indent_level + 1, module_name, is_export_namespace, export_namespace_name, f"{namespace_path}.{name}" if namespace_path else name)
                     result += f"{indent}}}{suffix}\n"
             else:
@@ -129,9 +128,8 @@ def generate_structure_exported_types(structure, indent_level, module_name='Main
             if data['type'] in ['ClassMeta', 'StructMeta', 'EnumMeta']:
                 # Reference the type from MainModule or export namespace
                 if is_export_namespace:
-                    result += f"{indent}{prefix}{name} = {module_name}['{data['mangled_name']}'];\n"
+                    result += f"{indent}{prefix}{name} = PossibleInstanceType<{module_name}['{data['mangled_name']}']>;\n"
                 else:
-                    full_path = f"{export_namespace_name}.{namespace_path}.{name}" if namespace_path else f"{export_namespace_name}.{name}"
-                    result += f"{indent}{name}: {full_path};\n"
+                    result += f"{indent}{name}: {module_name}['{data['mangled_name']}'];\n"
     
     return result

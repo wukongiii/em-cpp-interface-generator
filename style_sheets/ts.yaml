@@ -9,7 +9,9 @@ ProjectMeta:
     // Import the main module types from emcc-generated file
     import _MainModuleFactory, { MainModule as ${module_name} } from './${project_name}.js'; // Adjust path as needed
 
-    export namespace ${export} { 
+    type PossibleInstanceType<T> = T extends abstract new (...args: any) => infer R ? R : T;
+    
+    export namespace Types { 
         // STL Containers
     % for stl_container in stl_containers:
         export type ${shared.get_stl_readable_name(stl_container)} = ${ts.get_stl_container_emcc_type(stl_container, module_name)};
@@ -29,16 +31,16 @@ ProjectMeta:
 
     
     // Export the main interface structure that matches pre.js
-    export interface ${export} {
+    export interface Interfaces {
         // STL Containers
     % for stl_container in stl_containers:
-        ${shared.get_stl_readable_name(stl_container)}: ${export}.${shared.get_stl_readable_name(stl_container)};
+        ${shared.get_stl_readable_name(stl_container)}: ${module_name}['${stl_container.get_mangled_name()}'];
     % endfor
     
     // Top-level classes and structs
     % for defination in definations:
         % if defination.__class__.__name__ in ['ClassMeta', 'StructMeta']:
-        ${defination.get_ast_name()}: ${export}.${defination.get_ast_name()};
+        ${defination.get_ast_name()}: ${module_name}['${defination.get_mangled_name()}'];
         % endif
     % endfor
     
@@ -48,7 +50,7 @@ ProjectMeta:
     }
 
     export interface MainModule {
-        Restructured: Restructured;
+        Instances: Interfaces;
     }
     
     export default function MainModuleFactory (options?: unknown): Promise<MainModule>{
@@ -69,5 +71,4 @@ ProjectMeta:
     import shared_helpers as shared
     import ts_helpers as ts
 
-    export = 'Restructured'
     %>
